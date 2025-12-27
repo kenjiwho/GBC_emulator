@@ -6,5 +6,5 @@ pub fn main() !void {
 }
 
 test {
-    _ = @import("Gb.zig");
+    _ = @import("cpu_instructions.zig");
 }

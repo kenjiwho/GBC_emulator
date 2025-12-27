@@ -21,16 +21,16 @@ pub fn LD_r16_imm16(self: *Gb) void {
 
     switch (r16) {
         0 => { // BC
-            self.registers[0] = val1; // B
-            self.registers[1] = val2; // C
+            self.registers[2] = val1;
+            self.registers[3] = val2;
         },
         1 => { // DE
-            self.registers[2] = val1; // D
-            self.registers[3] = val2; // E
+            self.registers[4] = val1;
+            self.registers[5] = val2;
         },
         2 => { // HL
-            self.registers[4] = val1; // H
-            self.registers[5] = val2; // L
+            self.registers[6] = val1;
+            self.registers[7] = val2;
         },
         3 => self.sp = (@as(u16, val1) << 8) | val2, // SP
         else => unreachable,
@@ -49,26 +49,24 @@ pub fn LD_r16mem_A(self: *Gb) void {
 
     switch (r16mem) {
         0 => { // BC
-            const addr = (@as(u16, self.registers[0]) << 8) | self.registers[1];
-            self.RAM[addr] = self.registers[7]; // A
+            const addr = (@as(u16, self.registers[2]) << 8) | self.registers[3];
+            self.RAM[addr] = self.registers[0];
         },
         1 => { // DE
-            const addr = (@as(u16, self.registers[2]) << 8) | self.registers[3];
-            self.RAM[addr] = self.registers[7]; // A
+            const addr = (@as(u16, self.registers[4]) << 8) | self.registers[5];
+            self.RAM[addr] = self.registers[0];
         },
         2 => { // HLI
-            var addr = (@as(u16, self.registers[4]) << 8) | self.registers[5];
-            self.RAM[addr] = self.registers[7]; // A
-            addr += 1;
-            self.registers[4] = @intCast(addr >> 8);
-            self.registers[5] = @intCast(addr & 0xFF);
+            const addr = (@as(u16, self.registers[6]) << 8) | self.registers[7];
+            self.RAM[addr] = self.registers[0];
+            self.registers[7], const overflow: u1 = @addWithOverflow(self.registers[7], 1);
+            self.registers[6] +%= overflow;
         },
         3 => { // HLD
-            var addr = (@as(u16, self.registers[4]) << 8) | self.registers[5];
-            self.RAM[addr] = self.registers[7]; // A
-            addr -= 1;
-            self.registers[4] = @intCast(addr >> 8);
-            self.registers[5] = @intCast(addr & 0xFF);
+            const addr = (@as(u16, self.registers[6]) << 8) | self.registers[7];
+            self.RAM[addr] = self.registers[0];
+            self.registers[7], const overflow: u1 = @subWithOverflow(self.registers[7], 1);
+            self.registers[6] -%= overflow;
         },
         else => unreachable,
     }
@@ -81,37 +79,100 @@ pub fn LD_r16mem_A(self: *Gb) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_A_r16mem(self: Gb) void {
-    _ = self;
-    @panic("not implemented");
+pub fn LD_A_r16mem(self: *Gb) void {
+    const r16mem = (self.RAM[self.pc] >> 4) & 0b11;
+
+    switch (r16mem) {
+        0 => { // BC
+            const addr = (@as(u16, self.registers[2]) << 8) | self.registers[3];
+            self.registers[0] = self.RAM[addr];
+        },
+        1 => { // DE
+            const addr = (@as(u16, self.registers[4]) << 8) | self.registers[5];
+            self.registers[0] = self.RAM[addr];
+        },
+        2 => { // HLI
+            const addr = (@as(u16, self.registers[6]) << 8) | self.registers[7];
+            self.registers[0] = self.RAM[addr];
+            self.registers[7], const overflow: u1 = @addWithOverflow(self.registers[7], 1);
+            self.registers[6] +%= overflow;
+        },
+        3 => { // HLD
+            const addr = (@as(u16, self.registers[6]) << 8) | self.registers[7];
+            self.registers[0] = self.RAM[addr];
+            self.registers[7], const overflow: u1 = @subWithOverflow(self.registers[7], 1);
+            self.registers[6] -%= overflow;
+        },
+        else => unreachable,
+    }
+
+    self.pc += 1;
 }
 
-/// 00001000[imm16]: LD [imm16], SP: Copy SP & $FF at address imm16 and
-/// SP >> 8 at address imm16 + 1.
+/// 00001000[imm16]: LD [imm16], SP: Copy SP & $FF (lower byte of SP) at address imm16 and
+/// SP >> 8 (upper byte of SP) at address imm16 + 1.
 ///
 /// Cycles: 5
 /// Bytes: 3
-fn LD_imm16_SP(self: Gb) void {
-    _ = self;
-    @panic("not implemented");
+pub fn LD_imm16_SP(self: *Gb) void {
+    const imm16 = @as(u16, (self.RAM[self.pc + 1])) << 8 | self.RAM[self.pc + 2];
+    self.RAM[imm16] = @intCast(self.sp & 0xFF);
+    self.RAM[imm16 + 1] = @intCast(self.sp >> 8);
+    self.pc += 3;
 }
 
 /// 00[r16]0011: INC r16: Increment the value in register r16 by 1
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn INC_r16(self: Gb) void {
-    _ = self;
-    @panic("not implemented");
+pub fn INC_r16(self: *Gb) void {
+    const r16 = (self.RAM[self.pc] >> 4) & 0b11;
+
+    switch (r16) {
+        0 => { // BC
+            self.registers[3], const overflow: u1 = @addWithOverflow(self.registers[3], 1);
+            self.registers[2] +%= overflow;
+        },
+        1 => { // DE
+            self.registers[5], const overflow: u1 = @addWithOverflow(self.registers[5], 1);
+            self.registers[4] +%= overflow;
+        },
+        2 => { // HL
+            self.registers[7], const overflow: u1 = @addWithOverflow(self.registers[7], 1);
+            self.registers[6] +%= overflow;
+        },
+        3 => self.sp +%= 1, // SP
+        else => unreachable,
+    }
+
+    self.pc += 1;
 }
 
 /// 00[r16]1011: DEC r16: Decrement the value in register r16 by 1
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn DEC_r16(self: Gb) void {
-    _ = self;
-    @panic("not implemented");
+pub fn DEC_r16(self: *Gb) void {
+    const r16 = (self.RAM[self.pc] >> 4) & 0b11;
+
+    switch (r16) {
+        0 => { // BC
+            self.registers[3], const overflow: u1 = @subWithOverflow(self.registers[3], 1);
+            self.registers[2] -%= overflow;
+        },
+        1 => { // DE
+            self.registers[5], const overflow: u1 = @subWithOverflow(self.registers[5], 1);
+            self.registers[4] -%= overflow;
+        },
+        2 => { // HL
+            self.registers[7], const overflow: u1 = @subWithOverflow(self.registers[7], 1);
+            self.registers[6] -%= overflow;
+        },
+        3 => self.sp -%= 1, // SP
+        else => unreachable,
+    }
+
+    self.pc += 1;
 }
 
 /// 00[r16]1001: ADD HL, r16: Add the value in r16 to HL
@@ -122,9 +183,28 @@ fn DEC_r16(self: Gb) void {
 ///     N=0
 ///     H=Set if overflow from bit 11
 ///     C=Set if overflow from bit 15
-fn ADD_HL_r16(self: Gb) void {
-    _ = self;
-    @panic("not implemented");
+pub fn ADD_HL_r16(self: *Gb) void {
+    const r16 = (self.RAM[self.pc] >> 4) & 0b11;
+
+    const val = switch (r16) {
+        0 => @as(u16, self.registers[2]) << 8 | self.registers[3], // BC
+        1 => @as(u16, self.registers[4]) << 8 | self.registers[5], // DE
+        2 => @as(u16, self.registers[6]) << 8 | self.registers[7], // HL
+        3 => self.sp, // SP
+        else => unreachable,
+    };
+
+    var hl = (@as(u16, self.registers[6]) << 8) | self.registers[7];
+    const h: u8 = if (((@as(u32, hl) & 0x0FFF) + (@as(u32, val) & 0x0FFF)) > 0x0FFF) 1 else 0; // half carry flag
+    hl, const c: u8 = @addWithOverflow(hl, val); // add with carry flag
+
+    const z: u8 = self.registers[1] & 0b1; // perserve zero flag
+
+    self.registers[6] = @intCast(hl >> 8); // H register (high byte of HL)
+    self.registers[7] = @intCast(hl & 0x00FF); // L register (low byte of HL)
+    self.registers[1] = c << 3 | h << 2 | z; // Set flags in F register
+
+    self.pc += 1;
 }
 
 /// 00[r8]100: INC r8: Increment the value in register r8 by 1
@@ -980,4 +1060,140 @@ fn RES_b3_r8(self: Gb) void {
 fn SET_b3_r8(self: Gb) void {
     _ = self;
     @panic("not implemented");
+}
+
+test "NOP" {
+    var gb = Gb{};
+    gb.NOP();
+    try std.testing.expect(gb.pc == 1);
+}
+
+test "LD_r16_imm16" {
+    var gb = Gb{};
+    gb.RAM[0] = 0b00000001; // Opcode for LD BC, imm16
+    gb.RAM[1] = 0x34; // Low byte
+    gb.RAM[2] = 0x12; // High byte
+    gb.LD_r16_imm16();
+    try std.testing.expect(gb.registers[2] == 0x34); // Low byte
+    try std.testing.expect(gb.registers[3] == 0x12); // High byte
+    try std.testing.expect(gb.pc == 3);
+
+    gb.RAM[3] = 0b00110010; // Opcode for LD SP, imm16
+    gb.RAM[4] = 0x78; // Low byte
+    gb.RAM[5] = 0x56; // High byte
+    gb.LD_r16_imm16();
+    try std.testing.expect(gb.sp == 0x7856);
+    try std.testing.expect(gb.pc == 6);
+}
+
+test "LD_r16mem_A" {
+    var gb = Gb{};
+    gb.registers[0] = 0xAB; // A register
+    gb.RAM[0] = 0b00000010; // Opcode for LD (BC), A
+    gb.registers[2] = 0x34; // B register (high byte of BC)
+    gb.registers[3] = 0x12; // C register (low byte of BC)
+    gb.LD_r16mem_A();
+    try std.testing.expect(gb.RAM[0x3412] == 0xAB);
+    try std.testing.expect(gb.pc == 1);
+
+    gb.RAM[1] = 0b00100100; // Opcode for LD (HLI), A
+    gb.registers[6] = 0x56; // H register (high byte of HL)
+    gb.registers[7] = 0xFF; // L register (low byte of HL)
+    gb.LD_r16mem_A();
+    try std.testing.expect(gb.RAM[0x56FF] == 0xAB);
+    try std.testing.expect(gb.registers[6] == 0x57);
+    try std.testing.expect(gb.registers[7] == 0x00);
+    try std.testing.expect(gb.pc == 2);
+
+    gb.RAM[2] = 0b00110110; // Opcode for LD (HLD), A
+    gb.registers[6] = 0x4A; // H register (high byte of HL)
+    gb.registers[7] = 0xBC; // L register (low byte of HL)
+    gb.LD_r16mem_A();
+    try std.testing.expect(gb.RAM[0x4ABC] == 0xAB);
+    try std.testing.expect(gb.registers[6] == 0x4A);
+    try std.testing.expect(gb.registers[7] == 0xBB);
+    try std.testing.expect(gb.pc == 3);
+}
+
+test "LD_A_r16mem" {
+    var gb = Gb{};
+    gb.RAM[0x1234] = 0xCD;
+    gb.RAM[0] = 0b00001010; // Opcode for LD A, (BC)
+    gb.registers[2] = 0x12; // B register (high byte of BC)
+    gb.registers[3] = 0x34; // C register (low byte of BC)
+    gb.LD_A_r16mem();
+    try std.testing.expect(gb.registers[0] == 0xCD); // A register
+    try std.testing.expect(gb.pc == 1);
+}
+
+test "LD_imm16_SP" {
+    var gb = Gb{};
+    gb.sp = 0x9ABC;
+    gb.RAM[0] = 0b00001000; // Opcode for LD (imm16), SP
+    gb.RAM[1] = 0x10; // Low byte of imm16
+    gb.RAM[2] = 0x80; // High byte of imm16
+    gb.LD_imm16_SP();
+    try std.testing.expect(gb.RAM[0x1080] == 0xBC); // Low byte of SP
+    try std.testing.expect(gb.RAM[0x1081] == 0x9A); // High byte of SP
+    try std.testing.expect(gb.pc == 3);
+}
+
+test "INC_r16" {
+    var gb = Gb{};
+    gb.registers[2] = 0xFF; // B register
+    gb.registers[3] = 0xFF; // C register
+    gb.RAM[0] = 0b00000011; // Opcode for INC BC
+    gb.INC_r16();
+    try std.testing.expect(gb.registers[2] == 0x00); // B register
+    try std.testing.expect(gb.registers[3] == 0x00); // C register
+    try std.testing.expect(gb.pc == 1);
+
+    gb.sp = 0x1234; // SP
+    gb.RAM[1] = 0b00110011; // Opcode for INC SP
+    gb.INC_r16();
+    try std.testing.expect(gb.sp == 0x1235); // SP
+    try std.testing.expect(gb.pc == 2);
+}
+
+test "DEC_r16" {
+    var gb = Gb{};
+    gb.registers[2] = 0x00; // B register
+    gb.registers[3] = 0x00; // C register
+    gb.RAM[0] = 0b00001011; // Opcode for DEC BC
+    gb.DEC_r16();
+    try std.testing.expect(gb.registers[2] == 0xFF); // B register
+    try std.testing.expect(gb.registers[3] == 0xFF); // C register
+    try std.testing.expect(gb.pc == 1);
+
+    gb.sp = 0x0000; // SP
+    gb.RAM[1] = 0b00111011; // Opcode for DEC SP
+    gb.DEC_r16();
+    try std.testing.expect(gb.sp == 0xFFFF); // SP
+    try std.testing.expect(gb.pc == 2);
+}
+
+test "ADD_HL_r16" {
+    var gb = Gb{};
+    gb.registers[6] = 0x1F; // H register
+    gb.registers[7] = 0x34; // L register
+    gb.registers[2] = 0x01; // B register
+    gb.registers[3] = 0x10; // C register
+    gb.RAM[0] = 0b00000001; // Opcode for ADD HL, BC
+    gb.ADD_HL_r16();
+    try std.testing.expect(gb.registers[6] == 0x20);
+    try std.testing.expect(gb.registers[7] == 0x44);
+    try std.testing.expect(gb.registers[1] == 0b0100); // Check Flags
+    try std.testing.expect(gb.pc == 1);
+
+    gb.registers[1] = 0b0101;
+    gb.registers[6] = 0xFF; // H register
+    gb.registers[7] = 0xFF; // L register
+    gb.registers[4] = 0x00; // D register
+    gb.registers[5] = 0x01; // E register
+    gb.RAM[1] = 0b00010001; // Opcode for ADD HL, DE
+    gb.ADD_HL_r16();
+    try std.testing.expect(gb.registers[6] == 0x00);
+    try std.testing.expect(gb.registers[7] == 0x00);
+    try std.testing.expect(gb.registers[1] == 0b1101); // Check Flags
+    try std.testing.expect(gb.pc == 2);
 }
