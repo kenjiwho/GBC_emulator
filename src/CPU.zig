@@ -72,7 +72,7 @@ fn dispatch3(ctx: Context) void {
 /// Cycles: 1
 /// Bytes: 1
 fn NOP(ctx: Context) void {
-    ctx.pc.* += 1;
+    _ = ctx;
 }
 
 /// 00[r16]0001[imm16]: LD r16, imm16: Copy the value imm16 into register r16
@@ -84,7 +84,7 @@ fn LD_r16_imm16(ctx: Context) void {
     const imm16 = ctx.getImm16();
 
     ctx.regs.setR16(r16, imm16);
-    ctx.pc.* += 3;
+    ctx.pc.* += 2;
 }
 
 /// 00[r16mem]0010: LD [r16mem], A: Store value of register A into memory pointed to by r16mem
@@ -97,7 +97,6 @@ fn LD_r16mem_A(ctx: Context) void {
     const addr = ctx.regs.getR16mem(r16mem);
 
     ctx.RAM[addr] = ctx.regs.A;
-    ctx.pc.* += 1;
 }
 
 /// 00[r16mem]1010: LD A, [r16mem]: Load value of memory pointed to by r16mem into register A
@@ -110,7 +109,6 @@ fn LD_A_r16mem(ctx: Context) void {
     const addr = ctx.regs.getR16mem(r16mem);
 
     ctx.regs.A = ctx.RAM[addr];
-    ctx.pc.* += 1;
 }
 
 /// 00001000[imm16]: LD [imm16], SP: Copy SP & $FF (lower byte of SP) at address imm16 and
@@ -122,7 +120,7 @@ fn LD_imm16_SP(ctx: Context) void {
     const imm16 = ctx.getImm16();
     ctx.RAM[imm16] = @intCast(ctx.sp.* & 0xFF);
     ctx.RAM[imm16 + 1] = @intCast(ctx.sp.* >> 8);
-    ctx.pc.* += 3;
+    ctx.pc.* += 2;
 }
 
 /// 00[r16]0011: INC r16: Increment the value in register r16 by 1
@@ -134,7 +132,6 @@ fn INC_r16(ctx: Context) void {
     const new_val = ctx.regs.getR16(r16) +% 1;
 
     ctx.regs.setR16(r16, new_val);
-    ctx.pc.* += 1;
 }
 
 /// 00[r16]1011: DEC r16: Decrement the value in register r16 by 1
@@ -146,7 +143,6 @@ fn DEC_r16(ctx: Context) void {
     const new_val = ctx.regs.getR16(r16) -% 1;
 
     ctx.regs.setR16(r16, new_val);
-    ctx.pc.* += 1;
 }
 
 /// 00[r16]1001: ADD HL, r16: Add the value in r16 to HL
@@ -161,14 +157,13 @@ fn ADD_HL_r16(ctx: Context) void {
     const r16 = (ctx.opcode() >> 4) & 0b11;
     const val = ctx.regs.getR16(r16);
 
-    var hl = ctx.regs.getR16(2);
-    const h: u8 = if (((@as(u32, hl) & 0x0FFF) + (@as(u32, val) & 0x0FFF)) > 0x0FFF) 1 else 0; // half carry flag
-    hl, const c: u8 = @addWithOverflow(hl, val); // add with carry flag
-    const z: u8 = (ctx.regs.F & 0b10000000) >> 7; // perserve zero flag
+    const hl = ctx.regs.getR16(2);
+    const new_hl, const c: u8 = @addWithOverflow(hl, val); // add with carry flag
 
-    ctx.regs.setR16(2, hl); // set HL register
-    ctx.regs.setFlags(z, 0, h, c);
-    ctx.pc.* += 1;
+    ctx.regs.setR16(2, new_hl); // set HL register
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, ((@as(u32, hl) & 0x0FFF) + (@as(u32, val) & 0x0FFF)) > 0x0FFF);
+    ctx.regs.setFlag(.C, c == 1);
 }
 
 /// 00[r8]100: INC r8: Increment the value in register r8 by 1
@@ -184,13 +179,10 @@ fn INC_r8(ctx: Context) void {
     const val = ctx.regs.getR8(r8);
     const new_val = val +% 1;
 
-    const z: u8 = if (new_val == 0) 1 else 0;
-    const h: u8 = if (((ctx.regs.getR8(r8) & 0x0F) + (1 & 0x0F)) > 0x0F) 1 else 0; // half carry flag
-    const c = (ctx.regs.F & 0b00010000) >> 4; // perserve carry flag
-
     ctx.regs.setR8(r8, new_val);
-    ctx.regs.setFlags(z, 0, h, c);
-    ctx.pc.* += 1;
+    ctx.regs.setFlag(.Z, new_val == 0);
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, ((val & 0x0F) + (1 & 0x0F)) > 0x0F);
 }
 
 /// 00[r8]101: DEC r8: Decrement the value in register r8 by 1
@@ -202,8 +194,14 @@ fn INC_r8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 fn DEC_r8(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const r8 = (ctx.opcode() >> 3) & 0b111;
+    const val = ctx.regs.getR8(r8);
+    const new_val = val -% 1;
+
+    ctx.regs.setR8(r8, new_val);
+    ctx.regs.setFlag(.Z, new_val == 0);
+    ctx.regs.setFlag(.N, true);
+    ctx.regs.setFlag(.H, (val & 0x0F) < (1 & 0x0F));
 }
 
 /// 00[r8]110[imm8]: LD r8, imm8: Copy the value imm8 into register r8
@@ -211,8 +209,11 @@ fn DEC_r8(ctx: Context) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_imm8(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const r8 = (ctx.opcode() >> 3) & 0b111;
+    const imm8 = ctx.getImm8();
+
+    ctx.regs.setR8(r8, imm8);
+    ctx.pc.* += 1;
 }
 
 /// 00000111: RLCA: Rotate register A left
@@ -225,8 +226,13 @@ fn LD_r8_imm8(ctx: Context) void {
 ///     H=0
 ///     C=Set to old bit 7 of A
 fn RLCA(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const carry = ctx.regs.A >> 7;
+
+    ctx.regs.A = std.math.rotl(u8, ctx.regs.A, 1);
+    ctx.regs.setFlag(.Z, false);
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, false);
+    ctx.regs.setFlag(.C, carry == 1);
 }
 
 /// 00001111: RRCA: Rotate register A right
@@ -239,8 +245,13 @@ fn RLCA(ctx: Context) void {
 ///    H=0
 ///    C=Set to old bit 0 of A
 fn RRCA(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const carry = ctx.regs.A & 0b00000001;
+
+    ctx.regs.A = std.math.rotr(u8, ctx.regs.A, 1);
+    ctx.regs.setFlag(.Z, false);
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, false);
+    ctx.regs.setFlag(.C, carry == 1);
 }
 
 /// 00010111: RLA: Rotate register A left, through carry flag
@@ -253,8 +264,14 @@ fn RRCA(ctx: Context) void {
 ///    H=0
 ///    C=Set to old bit 7 of A
 fn RLA(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const old_carry = @intFromBool(ctx.regs.getFlag(.C));
+    const new_carry = (ctx.regs.A >> 7) & 0b1;
+
+    ctx.regs.A = (ctx.regs.A << 1) | old_carry;
+    ctx.regs.setFlag(.Z, false);
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, false);
+    ctx.regs.setFlag(.C, new_carry == 1);
 }
 
 /// 00011111: RRA: Rotate register A right, through carry flag
@@ -267,8 +284,13 @@ fn RLA(ctx: Context) void {
 ///    H=0
 ///    C=Set to old bit 0 of A
 fn RRA(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const old_carry: u8 = @intFromBool(ctx.regs.getFlag(.C));
+    const new_carry = ctx.regs.A & 0b1;
+    ctx.regs.A = (ctx.regs.A >> 1) | (old_carry << 7);
+    ctx.regs.setFlag(.Z, false);
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, false);
+    ctx.regs.setFlag(.C, new_carry == 1);
 }
 
 /// 00100111: DAA: Decimal Adjust Accumulator (register A)
@@ -1047,6 +1069,7 @@ test "NOP" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.PC == 1);
 }
 
@@ -1063,6 +1086,7 @@ test "LD_r16_imm16" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.B == 0x34); // Low byte
     try std.testing.expect(cpu.registers.C == 0x12); // High byte
     try std.testing.expect(cpu.registers.PC == 3);
@@ -1070,6 +1094,7 @@ test "LD_r16_imm16" {
     RAM[4] = 0x78; // Low byte
     RAM[5] = 0x56; // High byte
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.SP == 0x7856);
     try std.testing.expect(cpu.registers.PC == 6);
 }
@@ -1088,6 +1113,7 @@ test "LD_r16mem_A" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(RAM[0x3412] == 0xAB);
     try std.testing.expect(cpu.registers.PC == 1);
 
@@ -1095,6 +1121,7 @@ test "LD_r16mem_A" {
     cpu.registers.H = 0x56; // H register (high byte of HL)
     cpu.registers.L = 0xFF; // L register (low byte of HL)
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(RAM[0x56FF] == 0xAB);
     try std.testing.expect(cpu.registers.H == 0x57);
     try std.testing.expect(cpu.registers.L == 0x00);
@@ -1103,6 +1130,7 @@ test "LD_r16mem_A" {
     cpu.registers.H = 0x4A; // H register (high byte of HL)
     cpu.registers.L = 0xBC; // L register (low byte of HL)
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(RAM[0x4ABC] == 0xAB);
     try std.testing.expect(cpu.registers.H == 0x4A);
     try std.testing.expect(cpu.registers.L == 0xBB);
@@ -1123,6 +1151,7 @@ test "LD_A_r16mem" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.A == 0xCD); // A register
     try std.testing.expect(cpu.registers.PC == 1);
 }
@@ -1141,6 +1170,7 @@ test "LD_imm16_SP" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(RAM[0x1080] == 0xBC); // Low byte of SP
     try std.testing.expect(RAM[0x1081] == 0x9A); // High byte of SP
     try std.testing.expect(cpu.registers.PC == 3);
@@ -1159,6 +1189,7 @@ test "INC_r16" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.B == 0x00); // B register
     try std.testing.expect(cpu.registers.C == 0x00); // C register
     try std.testing.expect(cpu.registers.PC == 1);
@@ -1166,6 +1197,7 @@ test "INC_r16" {
     cpu.registers.SP = 0x1234; // SP
     RAM[1] = 0b00110011; // Opcode for INC SP
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.SP == 0x1235); // SP
     try std.testing.expect(cpu.registers.PC == 2);
 }
@@ -1183,6 +1215,7 @@ test "DEC_r16" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.B == 0xFF); // B register
     try std.testing.expect(cpu.registers.C == 0xFF); // C register
     try std.testing.expect(cpu.registers.PC == 1);
@@ -1190,6 +1223,7 @@ test "DEC_r16" {
     cpu.registers.SP = 0x0000; // SP
     RAM[1] = 0b00111011; // Opcode for DEC SP
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.SP == 0xFFFF); // SP
     try std.testing.expect(cpu.registers.PC == 2);
 }
@@ -1209,6 +1243,7 @@ test "ADD_HL_r16" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.H == 0x20);
     try std.testing.expect(cpu.registers.L == 0x44);
     try std.testing.expect(cpu.registers.F == 0b00100000); // Check Flags
@@ -1221,6 +1256,7 @@ test "ADD_HL_r16" {
     cpu.registers.E = 0x01; // E register
     RAM[1] = 0b00011001; // Opcode for ADD HL, DE
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.H == 0x00);
     try std.testing.expect(cpu.registers.L == 0x00);
     try std.testing.expect(cpu.registers.F == 0b10110000); // Check Flags
@@ -1239,7 +1275,117 @@ test "INC_r8" {
         .sp = &cpu.registers.SP,
     };
     cpu.execute(ctx);
+    ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.A == 0x00); // A register
     try std.testing.expect(cpu.registers.F == 0b10100000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "DEC_r8" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0x00; // A register
+    RAM[0] = 0b00111101; // Opcode for DEC A
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0xFF); // A register
+    try std.testing.expect(cpu.registers.F == 0b01100000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "LD_r8_imm8" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    RAM[0] = 0b00000110; // Opcode for LD B, imm8
+    RAM[1] = 0x7A; // imm8 value
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.B == 0x7A); // B register
+    try std.testing.expect(cpu.registers.PC == 2);
+}
+
+test "RLCA" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0b10000001; // A register
+    RAM[0] = 0b00000111; // Opcode for RLCA
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0b00000011); // A register
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "RRCA" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0b00000011; // A register
+    RAM[0] = 0b00001111; // Opcode for RRCA
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0b10000001); // A register
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "RLA" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0b10000001; // A register
+    cpu.registers.F = 0b00010000; // Set Carry flag
+    RAM[0] = 0b00010111; // Opcode for RLA
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0b00000011); // A register
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "RRA" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0b00000011; // A register
+    cpu.registers.F = 0b00010000; // Set Carry flag
+    RAM[0] = 0b00011111; // Opcode for RRA
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0b10000001); // A register
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
     try std.testing.expect(cpu.registers.PC == 1);
 }

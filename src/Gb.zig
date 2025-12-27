@@ -22,4 +22,5 @@ pub fn cycle(self: *GB) void {
     };
 
     self.cpu.execute(ctx);
+    ctx.pc.* += 1;
 }

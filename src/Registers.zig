@@ -15,10 +15,36 @@ L: u8 = 0,
 SP: u16 = 0, // Stack Pointer
 PC: u16 = 0, // Program Counter
 
+pub const Flag = enum(u3) {
+    Z = 7, // Zero Flag
+    N = 6, // Subtract Flag
+    H = 5, // Half Carry Flag
+    C = 4, // Carry Flag
+};
+
 pub fn init() Registers {
     return Registers{};
 }
 
+/// Gets flag from flags register
+pub fn getFlag(self: *Registers, flag: Flag) bool {
+    const bit: u3 = @intFromEnum(flag);
+
+    return ((self.F >> bit) & 0b1) == 1;
+}
+
+/// Sets the flags register
+pub fn setFlag(self: *Registers, flag: Flag, value: bool) void {
+    const bit: u3 = @intFromEnum(flag);
+
+    if (value) {
+        self.F |= @as(u8, 1) << bit;
+    } else {
+        self.F &= ~(@as(u8, 1) << bit);
+    }
+}
+
+/// Gets the value of an 8-bit register
 pub fn getR8(self: *Registers, r8: u8) u8 {
     return switch (r8) {
         0 => self.B,
@@ -33,6 +59,7 @@ pub fn getR8(self: *Registers, r8: u8) u8 {
     };
 }
 
+/// Sets the value of an 8-bit register
 pub fn setR8(self: *Registers, r8: u8, value: u8) void {
     switch (r8) {
         0 => self.B = value,
@@ -100,9 +127,4 @@ pub fn getR16mem(self: *Registers, r16mem: u8) u16 {
         },
         else => unreachable,
     };
-}
-
-/// Sets the flags register
-pub fn setFlags(self: *Registers, z: u8, n: u8, h: u8, c: u8) void {
-    self.F = z << 7 | n << 6 | h << 5 | c << 4;
 }
