@@ -319,8 +319,28 @@ fn RRA(ctx: Context) void {
 ///     H=0
 ///     C=Set or reset depending to operation
 fn DAA(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    var adjustment: u8 = 0;
+    if (ctx.regs.getFlag(.N)) {
+        if (ctx.regs.getFlag(.H)) {
+            adjustment += 0x6;
+        }
+        if (ctx.regs.getFlag(.C)) {
+            adjustment += 0x60;
+        }
+        ctx.regs.A -%= adjustment;
+    } else {
+        if (ctx.regs.getFlag(.H) or (ctx.regs.A & 0xF) > 0x9) {
+            adjustment += 0x6;
+        }
+        if (ctx.regs.getFlag(.C) or (ctx.regs.A) > 0x99) {
+            adjustment += 0x60;
+            ctx.regs.setFlag(.C, true);
+        }
+        ctx.regs.A +%= adjustment;
+    }
+
+    ctx.regs.setFlag(.Z, ctx.regs.A == 0);
+    ctx.regs.setFlag(.H, false);
 }
 
 /// 00101111: CPL: ComPLement accumulator (A = ~A) (bitwise NOT)
@@ -1388,4 +1408,32 @@ test "RRA" {
     try std.testing.expect(cpu.registers.A == 0b10000001); // A register
     try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
     try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "DAA" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0x98; // A register
+    cpu.registers.F = 0b01110000; // Clear all flags
+    RAM[0] = 0b00100111; // Opcode for DAA
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0x98 - 0x66);
+    try std.testing.expect(cpu.registers.F == 0b01010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+
+    cpu.registers.A = 0x12; // A register
+    cpu.registers.F = 0b00110000; // Set N flag
+    RAM[1] = 0b00100111; // Opcode for DAA
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0x12 + 0x66);
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 2);
 }
