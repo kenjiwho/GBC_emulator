@@ -14,8 +14,8 @@ pub fn opcode(self: Context) u8 {
 }
 
 /// Fetches a 8-bit immediate value from the instruction stream
-pub fn getImm8(self: Context) u8 {
-    return self.RAM[self.pc.* + 1];
+pub fn getImm8(self: Context, T: type) T {
+    return @bitCast(self.RAM[self.pc.* + 1]);
 }
 
 /// Fetches a 16-bit immediate value from the instruction stream

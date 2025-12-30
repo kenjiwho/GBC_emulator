@@ -210,7 +210,7 @@ fn DEC_r8(ctx: Context) void {
 /// Bytes: 2
 fn LD_r8_imm8(ctx: Context) void {
     const r8 = (ctx.opcode() >> 3) & 0b111;
-    const imm8 = ctx.getImm8();
+    const imm8 = ctx.getImm8(u8);
 
     ctx.regs.setR8(r8, imm8);
     ctx.pc.* += 1;
@@ -351,8 +351,10 @@ fn DAA(ctx: Context) void {
 ///     N=1
 ///     H=1
 fn CPL(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    ctx.regs.A = ~ctx.regs.A;
+
+    ctx.regs.setFlag(.N, true);
+    ctx.regs.setFlag(.H, true);
 }
 
 /// 00110111: SCF: Set Carry Flag
@@ -364,8 +366,9 @@ fn CPL(ctx: Context) void {
 ///     H=0
 ///     C=1
 fn SCF(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, false);
+    ctx.regs.setFlag(.C, true);
 }
 
 /// 00111111: CCF: Complement Carry Flag
@@ -377,19 +380,25 @@ fn SCF(ctx: Context) void {
 ///     H=0
 ///     C=Inverted
 fn CCF(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    ctx.regs.setFlag(.N, false);
+    ctx.regs.setFlag(.H, false);
+    ctx.regs.setFlag(.C, !ctx.regs.getFlag(.C));
 }
 
-/// 00011000[imm8]: jr imm8: Relative Jump to address imm8 (SP + imm8)
+/// 00011000[imm8]: jr imm8: Relative Jump to address imm8 (PC + 1 + imm8)
 /// Address is encoded as signed 8-bit offset from address immediately
 /// following the JR instruction.
 ///
 /// Cycles: 3
 /// Bytes: 2
 fn JR_imm8(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const imm8 = ctx.getImm8(i8);
+
+    ctx.pc.* += 1; // move past [imm8]
+    // cast pc and offset to i32 to perform signed addition
+    const pc_i32: i32 = @intCast(ctx.pc.*);
+    const offset_i32: i32 = @intCast(imm8);
+    ctx.pc.* = @intCast(pc_i32 + offset_i32);
 }
 
 /// 001[cond]000[imm8]: JR cond, imm8: Relative Jump to address imm8
@@ -1436,4 +1445,84 @@ test "DAA" {
     try std.testing.expect(cpu.registers.A == 0x12 + 0x66);
     try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
     try std.testing.expect(cpu.registers.PC == 2);
+}
+
+test "CPL" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.A = 0b10101010; // A register
+    RAM[0] = 0b00101111; // Opcode for CPL
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.A == 0b01010101); // A register
+    try std.testing.expect(cpu.registers.F == 0b01100000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "SCF" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.F = 0b00000000; // Clear all flags
+    RAM[0] = 0b00110111; // Opcode for SCF
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "CCF" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.F = 0b00010000; // Set Carry flag
+    RAM[0] = 0b00111111; // Opcode for CCF
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.F == 0b00000000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 1);
+
+    RAM[1] = 0b00111111; // Opcode for CCF
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.registers.PC == 2);
+}
+
+test "JR_imm8" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    RAM[0] = 0b00011000; // Opcode for JR imm8
+    RAM[1] = 0x05; // imm8 value
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.PC == 0x07); // PC should be 0 + 2 + 5
+
+    RAM[8] = @bitCast(@as(i8, -2)); // imm8 value to jump back
+    RAM[7] = 0b00011000; // Opcode for JR imm8
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.PC == 0x07); // PC should be 7 + 2 - 2
 }
