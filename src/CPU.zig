@@ -103,7 +103,17 @@ fn dispatch3(self: *CPU, opcode: u8) void {
         0xF9 => self.LD_SP_HL(),
         0xF3 => self.DI(),
         0xFB => self.EI(),
-        else => unreachable,
+        else => {
+            switch (opcode & 0b111) { // lower 3 bits
+                0b000 => self.RET_cond(),
+                0b001 => self.POP_r16stk(),
+                0b010 => self.JP_cond_imm16(),
+                0b100 => self.CALL_cond_imm16(),
+                0b101 => self.PUSH_r16stk(),
+                0b111 => self.RST_tgt3(),
+                else => unreachable,
+            }
+        },
     }
 }
 
