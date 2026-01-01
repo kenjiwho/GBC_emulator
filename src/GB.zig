@@ -7,7 +7,7 @@ const Context = @import("Context.zig");
 RAM: [0x8000]u8 = @splat(0), // 32KiB RAM
 vRAM: [0x4000]u8 = @splat(0), // 16KiB vRAM
 screen: [160 * 144]u8 = @splat(0), // 160x144 pixels
-cpu: CPU = CPU.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
+cpu: CPU = CPU.init(), // cpu
 
 pub fn init() GB {
     return GB{};

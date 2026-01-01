@@ -1,3 +1,4 @@
+//! CPU module: implements the main CPU functionality
 const CPU = @This();
 
 const std = @import("std");
@@ -56,7 +57,10 @@ fn dispatch0(ctx: Context) void {
     }
 }
 fn dispatch1(ctx: Context) void {
-    _ = ctx;
+    switch (ctx.opcode()) { // full opcode
+        0x76 => HALT(ctx),
+        else => LD_r8_r8(ctx),
+    }
 }
 fn dispatch2(ctx: Context) void {
     _ = ctx;
@@ -409,8 +413,12 @@ fn JR_imm8(ctx: Context) void {
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
 fn JR_cond_imm8(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const cond = (ctx.opcode() >> 3) & 0b11;
+    if (ctx.regs.checkCondition(cond)) {
+        JR_imm8(ctx);
+    } else {
+        ctx.pc.* += 1; // skip imm8
+    }
 }
 
 /// 00010000: STOP: What happens depends on the state of the emulator. Refer to
@@ -433,8 +441,11 @@ fn STOP(ctx: Context) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_r8(ctx: Context) void {
-    _ = ctx;
-    @panic("not implemented");
+    const src = ctx.opcode() & 0b111;
+    const dest = (ctx.opcode() >> 3) & 0b111;
+    const value = ctx.getR8(src);
+
+    ctx.setR8(dest, value);
 }
 
 /// 01110110: HALT (LD [HL], [HL]): Enter CPU low-power mode until an interrupt
@@ -1525,4 +1536,68 @@ test "JR_imm8" {
     cpu.execute(ctx);
     ctx.pc.* += 1;
     try std.testing.expect(cpu.registers.PC == 0x07); // PC should be 7 + 2 - 2
+}
+
+test "JR_cond_imm8" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    RAM[0] = 0b00100000; // Opcode for JR NZ, imm8
+    RAM[1] = 0x04; // imm8 value
+    cpu.registers.F = 0b00000000; // Z flag not set
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.PC == 0x06); // PC should be 0 + 2 + 4
+
+    RAM[6] = 0b00100000; // Opcode for JR NZ, imm8
+    RAM[7] = 0x04; // imm8 value
+    cpu.registers.F = 0b10000000; // Z flag set
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.PC == 0x08); // PC should be 6 + 2
+}
+
+test "LD_r8_r8" {
+    var cpu = CPU.init();
+    var RAM: [0x8000]u8 = @splat(0);
+    cpu.registers.B = 0x56; // B register
+    RAM[0] = 0b01000000; // Opcode for LD B, B
+    const ctx = Context{
+        .RAM = &RAM,
+        .regs = &cpu.registers,
+        .pc = &cpu.registers.PC,
+        .sp = &cpu.registers.SP,
+    };
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.B == 0x56); // B register
+    try std.testing.expect(cpu.registers.PC == 1);
+
+    cpu.registers.C = 0x78; // C register
+    RAM[1] = 0b01000001; // Opcode for LD B, C
+    cpu.execute(ctx);
+    ctx.pc.* += 1;
+    try std.testing.expect(cpu.registers.B == 0x78); // B register
+    try std.testing.expect(cpu.registers.PC == 2);
+}
+
+test "HALT" {
+    // var cpu = CPU.init();
+    // var RAM: [0x8000]u8 = @splat(0);
+    // RAM[0] = 0b01110110; // Opcode for HALT
+    // const ctx = Context{
+    //     .RAM = &RAM,
+    //     .regs = &cpu.registers,
+    //     .pc = &cpu.registers.PC,
+    //     .sp = &cpu.registers.SP,
+    // };
+    // cpu.execute(ctx);
+    // ctx.pc.* += 1;
+    // try std.testing.expect(cpu.halted == true);
+    // try std.testing.expect(cpu.registers.PC == 1);
 }
