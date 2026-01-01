@@ -2,25 +2,21 @@ const GB = @This();
 
 const std = @import("std");
 const CPU = @import("CPU.zig");
-const Context = @import("Context.zig");
 
 RAM: [0x8000]u8 = @splat(0), // 32KiB RAM
 vRAM: [0x4000]u8 = @splat(0), // 16KiB vRAM
 screen: [160 * 144]u8 = @splat(0), // 160x144 pixels
-cpu: CPU = CPU.init(), // cpu
+cpu: CPU = undefined, // cpu
 
 pub fn init() GB {
-    return GB{};
+    var gb = GB{};
+
+    gb.cpu = CPU.init(gb.RAM[0..]);
+
+    return gb;
 }
 
 pub fn cycle(self: *GB) void {
-    const ctx = Context{
-        .regs = &self.cpu.registers,
-        .RAM = &self.RAM,
-        .pc = &self.cpu.registers.PC,
-        .sp = &self.cpu.registers.SP,
-    };
-
-    self.cpu.execute(ctx);
-    ctx.pc.* += 1;
+    self.cpu.execute();
+    self.cpu.regs.PC += 1;
 }

@@ -3,12 +3,12 @@ const CPU = @This();
 
 const std = @import("std");
 const Registers = @import("Registers.zig");
-const Context = @import("Context.zig");
 
 // opcode function type
-const DispatchFn = *const fn (ctx: Context) void;
+const DispatchFn = *const fn (self: *CPU) void;
 
-registers: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
+regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
+RAM: []u8, // reference to the system RAM so instructions can read/write memory
 comptime dispatch_ptr_tbl: [4]DispatchFn = .{
     dispatch0,
     dispatch1,
@@ -16,58 +16,193 @@ comptime dispatch_ptr_tbl: [4]DispatchFn = .{
     dispatch3,
 },
 
-pub fn init() CPU {
-    return CPU{};
+pub fn init(RAM: []u8) CPU {
+    return CPU{ .RAM = RAM };
 }
 
-pub fn execute(self: *CPU, ctx: Context) void {
-    self.dispatch_ptr_tbl[(ctx.opcode() >> 6)](ctx);
+pub fn execute(self: *CPU) void {
+    self.dispatch_ptr_tbl[(self.opcode() >> 6)](self);
 }
 
 // --------------------------------- opcode dispatchers --------------------
-fn dispatch0(ctx: Context) void {
-    switch (ctx.opcode()) { // full opcode
-        0x00 => NOP(ctx),
-        0x08 => LD_imm16_SP(ctx),
-        0x18 => JR_imm8(ctx),
-        0x10 => STOP(ctx),
-        0x07 => RLCA(ctx),
-        0x0F => RRCA(ctx),
-        0x17 => RLA(ctx),
-        0x1F => RRA(ctx),
-        0x27 => DAA(ctx),
-        0x2F => CPL(ctx),
-        0x37 => SCF(ctx),
-        0x3F => CCF(ctx),
-        0x20, 0x28, 0x30, 0x38 => JR_cond_imm8(ctx),
+fn dispatch0(self: *CPU) void {
+    switch (self.opcode()) { // full opcode
+        0x00 => self.NOP(),
+        0x08 => self.LD_imm16_SP(),
+        0x18 => self.JR_imm8(),
+        0x10 => self.STOP(),
+        0x07 => self.RLCA(),
+        0x0F => self.RRCA(),
+        0x17 => self.RLA(),
+        0x1F => self.RRA(),
+        0x27 => self.DAA(),
+        0x2F => self.CPL(),
+        0x37 => self.SCF(),
+        0x3F => self.CCF(),
+        0x20, 0x28, 0x30, 0x38 => self.JR_cond_imm8(),
         else => {
-            switch (ctx.opcode() & 0xF) { // lower 4 bits
-                0x1 => LD_r16_imm16(ctx),
-                0x2 => LD_r16mem_A(ctx),
-                0x3 => INC_r16(ctx),
-                0x4, 0xC => INC_r8(ctx),
-                0x5, 0xD => DEC_r8(ctx),
-                0x6, 0xE => LD_r8_imm8(ctx),
-                0x9 => ADD_HL_r16(ctx),
-                0xA => LD_A_r16mem(ctx),
-                0xB => DEC_r16(ctx),
+            switch (self.opcode() & 0xF) { // lower 4 bits
+                0x1 => self.LD_r16_imm16(),
+                0x2 => self.LD_r16mem_A(),
+                0x3 => self.INC_r16(),
+                0x4, 0xC => self.INC_r8(),
+                0x5, 0xD => self.DEC_r8(),
+                0x6, 0xE => self.LD_r8_imm8(),
+                0x9 => self.ADD_HL_r16(),
+                0xA => self.LD_A_r16mem(),
+                0xB => self.DEC_r16(),
                 else => unreachable,
             }
         },
     }
 }
-fn dispatch1(ctx: Context) void {
-    switch (ctx.opcode()) { // full opcode
-        0x76 => HALT(ctx),
-        else => LD_r8_r8(ctx),
+fn dispatch1(self: *CPU) void {
+    switch (self.opcode()) { // full opcode
+        0x76 => self.HALT(),
+        else => self.LD_r8_r8(),
     }
 }
-fn dispatch2(ctx: Context) void {
-    _ = ctx;
+fn dispatch2(self: *CPU) void {
+    _ = self;
 }
-fn dispatch3(ctx: Context) void {
-    _ = ctx;
+fn dispatch3(self: *CPU) void {
+    _ = self;
 }
+
+// --------------------------------- helper functions ----------------------
+/// Fetches the opcode at the current PC
+fn opcode(self: CPU) u8 {
+    return self.RAM[self.regs.PC];
+}
+
+/// Gets flag from flags register
+fn getFlag(self: CPU, flag: Registers.Flag) bool {
+    const bit: u3 = @intFromEnum(flag);
+
+    return ((self.regs.F >> bit) & 0b1) == 1;
+}
+
+/// Sets the flags register
+fn setFlag(self: *CPU, flag: Registers.Flag, value: bool) void {
+    const bit: u3 = @intFromEnum(flag);
+
+    if (value) {
+        self.regs.F |= @as(u8, 1) << bit;
+    } else {
+        self.regs.F &= ~(@as(u8, 1) << bit);
+    }
+}
+
+/// Check a condition code
+fn checkCondition(self: CPU, condition: u8) bool {
+    return switch (condition) {
+        0 => !self.getFlag(.Z), // NZ
+        1 => self.getFlag(.Z), // Z
+        2 => !self.getFlag(.C), // NC
+        3 => self.getFlag(.C), // C
+        else => unreachable,
+    };
+}
+
+/// Gets the value of an 8-bit register
+fn getR8(self: CPU, r8: u8) u8 {
+    return switch (r8) {
+        0 => self.regs.B,
+        1 => self.regs.C,
+        2 => self.regs.D,
+        3 => self.regs.E,
+        4 => self.regs.H,
+        5 => self.regs.L,
+        6 => { // read from memory pointed to by HL
+            const addr = self.getR16(2); // HL
+            return self.RAM[addr];
+        },
+        7 => self.regs.A,
+        else => unreachable,
+    };
+}
+
+/// Sets the value of an 8-bit register
+fn setR8(self: *CPU, r8: u8, value: u8) void {
+    switch (r8) {
+        0 => self.regs.B = value,
+        1 => self.regs.C = value,
+        2 => self.regs.D = value,
+        3 => self.regs.E = value,
+        4 => self.regs.H = value,
+        5 => self.regs.L = value,
+        6 => { // write to memory pointed to by HL
+            const addr = self.getR16(2); // HL
+            self.RAM[addr] = value;
+        },
+        7 => self.regs.A = value,
+        else => unreachable,
+    }
+}
+
+/// Gets the value of a 16-bit register pair
+fn getR16(self: CPU, r16: u8) u16 {
+    return switch (r16) {
+        0 => (@as(u16, self.regs.B) << 8) | self.regs.C,
+        1 => (@as(u16, self.regs.D) << 8) | self.regs.E,
+        2 => (@as(u16, self.regs.H) << 8) | self.regs.L,
+        3 => self.regs.SP,
+        else => unreachable,
+    };
+}
+
+/// Sets the value of a 16-bit register pair
+fn setR16(self: *CPU, r16: u8, value: u16) void {
+    switch (r16) {
+        0 => {
+            self.regs.B = @intCast(value >> 8);
+            self.regs.C = @intCast(value & 0xFF);
+        },
+        1 => {
+            self.regs.D = @intCast(value >> 8);
+            self.regs.E = @intCast(value & 0xFF);
+        },
+        2 => {
+            self.regs.H = @intCast(value >> 8);
+            self.regs.L = @intCast(value & 0xFF);
+        },
+        3 => {
+            self.regs.SP = value;
+        },
+        else => unreachable,
+    }
+}
+
+/// Gets the address pointed to by a 16-bit register pair, with optional
+/// increment/decrement for HL.
+fn getR16mem(self: *CPU, r16mem: u8) u16 {
+    return switch (r16mem) {
+        0, 1 => self.getR16(r16mem),
+        2 => { // HLI
+            const addr = self.getR16(2); // HL
+            self.setR16(2, addr +% 1);
+            return addr;
+        },
+        3 => { // HLD
+            const addr = self.getR16(2); // HL
+            self.setR16(2, addr -% 1);
+            return addr;
+        },
+        else => unreachable,
+    };
+}
+
+/// Fetches a 8-bit immediate value from the instruction stream
+fn getImm8(self: CPU, T: type) T {
+    return @bitCast(self.RAM[self.regs.PC + 1]);
+}
+
+/// Fetches a 16-bit immediate value from the instruction stream
+fn getImm16(self: CPU) u16 {
+    return (@as(u16, self.RAM[self.regs.PC + 1]) << 8) | self.RAM[self.regs.PC + 2];
+}
+
+// --------------------------------- end helper functions ------------------
 
 // --------------------------------- CPU Instructions -------------------------
 // --------------------------------- block 0 ----------------------------------
@@ -75,20 +210,20 @@ fn dispatch3(ctx: Context) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn NOP(ctx: Context) void {
-    _ = ctx;
+fn NOP(self: CPU) void {
+    _ = self;
 }
 
 /// 00[r16]0001[imm16]: LD r16, imm16: Copy the value imm16 into register r16
 ///
 /// Cycles: 3
 /// Bytes: 3
-fn LD_r16_imm16(ctx: Context) void {
-    const r16 = (ctx.opcode() >> 4) & 0b11;
-    const imm16 = ctx.getImm16();
+fn LD_r16_imm16(self: *CPU) void {
+    const r16 = (self.opcode() >> 4) & 0b11;
+    const imm16 = self.getImm16();
 
-    ctx.regs.setR16(r16, imm16);
-    ctx.pc.* += 2;
+    self.setR16(r16, imm16);
+    self.regs.PC += 2;
 }
 
 /// 00[r16mem]0010: LD [r16mem], A: Store value of register A into memory pointed to by r16mem
@@ -96,11 +231,11 @@ fn LD_r16_imm16(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_r16mem_A(ctx: Context) void {
-    const r16mem = (ctx.opcode() >> 4) & 0b11;
-    const addr = ctx.regs.getR16mem(r16mem);
+fn LD_r16mem_A(self: *CPU) void {
+    const r16mem = (self.opcode() >> 4) & 0b11;
+    const addr = self.getR16mem(r16mem);
 
-    ctx.RAM[addr] = ctx.regs.A;
+    self.RAM[addr] = self.regs.A;
 }
 
 /// 00[r16mem]1010: LD A, [r16mem]: Load value of memory pointed to by r16mem into register A
@@ -108,11 +243,11 @@ fn LD_r16mem_A(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_A_r16mem(ctx: Context) void {
-    const r16mem = (ctx.opcode() >> 4) & 0b11;
-    const addr = ctx.regs.getR16mem(r16mem);
+fn LD_A_r16mem(self: *CPU) void {
+    const r16mem = (self.opcode() >> 4) & 0b11;
+    const addr = self.getR16mem(r16mem);
 
-    ctx.regs.A = ctx.RAM[addr];
+    self.regs.A = self.RAM[addr];
 }
 
 /// 00001000[imm16]: LD [imm16], SP: Copy SP & $FF (lower byte of SP) at address imm16 and
@@ -120,33 +255,33 @@ fn LD_A_r16mem(ctx: Context) void {
 ///
 /// Cycles: 5
 /// Bytes: 3
-fn LD_imm16_SP(ctx: Context) void {
-    const imm16 = ctx.getImm16();
-    ctx.RAM[imm16] = @intCast(ctx.sp.* & 0xFF);
-    ctx.RAM[imm16 + 1] = @intCast(ctx.sp.* >> 8);
-    ctx.pc.* += 2;
+fn LD_imm16_SP(self: *CPU) void {
+    const imm16 = self.getImm16();
+    self.RAM[imm16] = @intCast(self.regs.SP & 0xFF);
+    self.RAM[imm16 + 1] = @intCast(self.regs.SP >> 8);
+    self.regs.PC += 2;
 }
 
 /// 00[r16]0011: INC r16: Increment the value in register r16 by 1
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn INC_r16(ctx: Context) void {
-    const r16 = (ctx.opcode() >> 4) & 0b11;
-    const new_val = ctx.regs.getR16(r16) +% 1;
+fn INC_r16(self: *CPU) void {
+    const r16 = (self.opcode() >> 4) & 0b11;
+    const new_val = self.getR16(r16) +% 1;
 
-    ctx.regs.setR16(r16, new_val);
+    self.setR16(r16, new_val);
 }
 
 /// 00[r16]1011: DEC r16: Decrement the value in register r16 by 1
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn DEC_r16(ctx: Context) void {
-    const r16 = (ctx.opcode() >> 4) & 0b11;
-    const new_val = ctx.regs.getR16(r16) -% 1;
+fn DEC_r16(self: *CPU) void {
+    const r16 = (self.opcode() >> 4) & 0b11;
+    const new_val = self.getR16(r16) -% 1;
 
-    ctx.regs.setR16(r16, new_val);
+    self.setR16(r16, new_val);
 }
 
 /// 00[r16]1001: ADD HL, r16: Add the value in r16 to HL
@@ -157,17 +292,17 @@ fn DEC_r16(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 11
 ///     C=Set if overflow from bit 15
-fn ADD_HL_r16(ctx: Context) void {
-    const r16 = (ctx.opcode() >> 4) & 0b11;
-    const val = ctx.regs.getR16(r16);
+fn ADD_HL_r16(self: *CPU) void {
+    const r16 = (self.opcode() >> 4) & 0b11;
+    const val = self.getR16(r16);
 
-    const hl = ctx.regs.getR16(2);
+    const hl = self.getR16(2);
     const new_hl, const c: u8 = @addWithOverflow(hl, val); // add with carry flag
 
-    ctx.regs.setR16(2, new_hl); // set HL register
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, ((@as(u32, hl) & 0x0FFF) + (@as(u32, val) & 0x0FFF)) > 0x0FFF);
-    ctx.regs.setFlag(.C, c == 1);
+    self.setR16(2, new_hl); // set HL register
+    self.setFlag(.N, false);
+    self.setFlag(.H, ((@as(u32, hl) & 0x0FFF) + (@as(u32, val) & 0x0FFF)) > 0x0FFF);
+    self.setFlag(.C, c == 1);
 }
 
 /// 00[r8]100: INC r8: Increment the value in register r8 by 1
@@ -178,15 +313,15 @@ fn ADD_HL_r16(ctx: Context) void {
 ///     Z=Set if result is zero
 ///     N=0
 ///     H=Set if overflow from bit 3
-fn INC_r8(ctx: Context) void {
-    const r8 = (ctx.opcode() >> 3) & 0b111;
-    const val = ctx.regs.getR8(r8);
+fn INC_r8(self: *CPU) void {
+    const r8 = (self.opcode() >> 3) & 0b111;
+    const val = self.getR8(r8);
     const new_val = val +% 1;
 
-    ctx.regs.setR8(r8, new_val);
-    ctx.regs.setFlag(.Z, new_val == 0);
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, ((val & 0x0F) + (1 & 0x0F)) > 0x0F);
+    self.setR8(r8, new_val);
+    self.setFlag(.Z, new_val == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, ((val & 0x0F) + (1 & 0x0F)) > 0x0F);
 }
 
 /// 00[r8]101: DEC r8: Decrement the value in register r8 by 1
@@ -197,27 +332,27 @@ fn INC_r8(ctx: Context) void {
 ///     Z=Set if result is zero
 ///     N=1
 ///     H=Set if borrow from bit 4
-fn DEC_r8(ctx: Context) void {
-    const r8 = (ctx.opcode() >> 3) & 0b111;
-    const val = ctx.regs.getR8(r8);
+fn DEC_r8(self: *CPU) void {
+    const r8 = (self.opcode() >> 3) & 0b111;
+    const val = self.getR8(r8);
     const new_val = val -% 1;
 
-    ctx.regs.setR8(r8, new_val);
-    ctx.regs.setFlag(.Z, new_val == 0);
-    ctx.regs.setFlag(.N, true);
-    ctx.regs.setFlag(.H, (val & 0x0F) < (1 & 0x0F));
+    self.setR8(r8, new_val);
+    self.setFlag(.Z, new_val == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, (val & 0x0F) < (1 & 0x0F));
 }
 
 /// 00[r8]110[imm8]: LD r8, imm8: Copy the value imm8 into register r8
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn LD_r8_imm8(ctx: Context) void {
-    const r8 = (ctx.opcode() >> 3) & 0b111;
-    const imm8 = ctx.getImm8(u8);
+fn LD_r8_imm8(self: *CPU) void {
+    const r8 = (self.opcode() >> 3) & 0b111;
+    const imm8 = self.getImm8(u8);
 
-    ctx.regs.setR8(r8, imm8);
-    ctx.pc.* += 1;
+    self.setR8(r8, imm8);
+    self.regs.PC += 1;
 }
 
 /// 00000111: RLCA: Rotate register A left
@@ -229,14 +364,14 @@ fn LD_r8_imm8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of A
-fn RLCA(ctx: Context) void {
-    const carry = ctx.regs.A >> 7;
+fn RLCA(self: *CPU) void {
+    const carry = self.regs.A >> 7;
 
-    ctx.regs.A = std.math.rotl(u8, ctx.regs.A, 1);
-    ctx.regs.setFlag(.Z, false);
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, false);
-    ctx.regs.setFlag(.C, carry == 1);
+    self.regs.A = std.math.rotl(u8, self.regs.A, 1);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 00001111: RRCA: Rotate register A right
@@ -248,14 +383,14 @@ fn RLCA(ctx: Context) void {
 ///    N=0
 ///    H=0
 ///    C=Set to old bit 0 of A
-fn RRCA(ctx: Context) void {
-    const carry = ctx.regs.A & 0b00000001;
+fn RRCA(self: *CPU) void {
+    const carry = self.regs.A & 0b00000001;
 
-    ctx.regs.A = std.math.rotr(u8, ctx.regs.A, 1);
-    ctx.regs.setFlag(.Z, false);
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, false);
-    ctx.regs.setFlag(.C, carry == 1);
+    self.regs.A = std.math.rotr(u8, self.regs.A, 1);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 00010111: RLA: Rotate register A left, through carry flag
@@ -267,15 +402,15 @@ fn RRCA(ctx: Context) void {
 ///    N=0
 ///    H=0
 ///    C=Set to old bit 7 of A
-fn RLA(ctx: Context) void {
-    const old_carry = @intFromBool(ctx.regs.getFlag(.C));
-    const new_carry = (ctx.regs.A >> 7) & 0b1;
+fn RLA(self: *CPU) void {
+    const old_carry = @intFromBool(self.getFlag(.C));
+    const new_carry = (self.regs.A >> 7) & 0b1;
 
-    ctx.regs.A = (ctx.regs.A << 1) | old_carry;
-    ctx.regs.setFlag(.Z, false);
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, false);
-    ctx.regs.setFlag(.C, new_carry == 1);
+    self.regs.A = (self.regs.A << 1) | old_carry;
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, new_carry == 1);
 }
 
 /// 00011111: RRA: Rotate register A right, through carry flag
@@ -287,14 +422,14 @@ fn RLA(ctx: Context) void {
 ///    N=0
 ///    H=0
 ///    C=Set to old bit 0 of A
-fn RRA(ctx: Context) void {
-    const old_carry: u8 = @intFromBool(ctx.regs.getFlag(.C));
-    const new_carry = ctx.regs.A & 0b1;
-    ctx.regs.A = (ctx.regs.A >> 1) | (old_carry << 7);
-    ctx.regs.setFlag(.Z, false);
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, false);
-    ctx.regs.setFlag(.C, new_carry == 1);
+fn RRA(self: *CPU) void {
+    const old_carry: u8 = @intFromBool(self.getFlag(.C));
+    const new_carry = self.regs.A & 0b1;
+    self.regs.A = (self.regs.A >> 1) | (old_carry << 7);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, new_carry == 1);
 }
 
 /// 00100111: DAA: Decimal Adjust Accumulator (register A)
@@ -322,29 +457,29 @@ fn RRA(ctx: Context) void {
 ///     Z=Set if result is zero
 ///     H=0
 ///     C=Set or reset depending to operation
-fn DAA(ctx: Context) void {
+fn DAA(self: *CPU) void {
     var adjustment: u8 = 0;
-    if (ctx.regs.getFlag(.N)) {
-        if (ctx.regs.getFlag(.H)) {
+    if (self.getFlag(.N)) {
+        if (self.getFlag(.H)) {
             adjustment += 0x6;
         }
-        if (ctx.regs.getFlag(.C)) {
+        if (self.getFlag(.C)) {
             adjustment += 0x60;
         }
-        ctx.regs.A -%= adjustment;
+        self.regs.A -%= adjustment;
     } else {
-        if (ctx.regs.getFlag(.H) or (ctx.regs.A & 0xF) > 0x9) {
+        if (self.getFlag(.H) or (self.regs.A & 0xF) > 0x9) {
             adjustment += 0x6;
         }
-        if (ctx.regs.getFlag(.C) or (ctx.regs.A) > 0x99) {
+        if (self.getFlag(.C) or (self.regs.A) > 0x99) {
             adjustment += 0x60;
-            ctx.regs.setFlag(.C, true);
+            self.setFlag(.C, true);
         }
-        ctx.regs.A +%= adjustment;
+        self.regs.A +%= adjustment;
     }
 
-    ctx.regs.setFlag(.Z, ctx.regs.A == 0);
-    ctx.regs.setFlag(.H, false);
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.H, false);
 }
 
 /// 00101111: CPL: ComPLement accumulator (A = ~A) (bitwise NOT)
@@ -354,11 +489,11 @@ fn DAA(ctx: Context) void {
 /// Flags:
 ///     N=1
 ///     H=1
-fn CPL(ctx: Context) void {
-    ctx.regs.A = ~ctx.regs.A;
+fn CPL(self: *CPU) void {
+    self.regs.A = ~self.regs.A;
 
-    ctx.regs.setFlag(.N, true);
-    ctx.regs.setFlag(.H, true);
+    self.setFlag(.N, true);
+    self.setFlag(.H, true);
 }
 
 /// 00110111: SCF: Set Carry Flag
@@ -369,10 +504,10 @@ fn CPL(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=1
-fn SCF(ctx: Context) void {
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, false);
-    ctx.regs.setFlag(.C, true);
+fn SCF(self: *CPU) void {
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, true);
 }
 
 /// 00111111: CCF: Complement Carry Flag
@@ -383,10 +518,10 @@ fn SCF(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Inverted
-fn CCF(ctx: Context) void {
-    ctx.regs.setFlag(.N, false);
-    ctx.regs.setFlag(.H, false);
-    ctx.regs.setFlag(.C, !ctx.regs.getFlag(.C));
+fn CCF(self: *CPU) void {
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, !self.getFlag(.C));
 }
 
 /// 00011000[imm8]: jr imm8: Relative Jump to address imm8 (PC + 1 + imm8)
@@ -395,14 +530,14 @@ fn CCF(ctx: Context) void {
 ///
 /// Cycles: 3
 /// Bytes: 2
-fn JR_imm8(ctx: Context) void {
-    const imm8 = ctx.getImm8(i8);
+fn JR_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(i8);
 
-    ctx.pc.* += 1; // move past [imm8]
+    self.regs.PC += 1; // move past [imm8]
     // cast pc and offset to i32 to perform signed addition
-    const pc_i32: i32 = @intCast(ctx.pc.*);
+    const pc_i32: i32 = @intCast(self.regs.PC);
     const offset_i32: i32 = @intCast(imm8);
-    ctx.pc.* = @intCast(pc_i32 + offset_i32);
+    self.regs.PC = @intCast(pc_i32 + offset_i32);
 }
 
 /// 001[cond]000[imm8]: JR cond, imm8: Relative Jump to address imm8
@@ -412,12 +547,12 @@ fn JR_imm8(ctx: Context) void {
 ///
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
-fn JR_cond_imm8(ctx: Context) void {
-    const cond = (ctx.opcode() >> 3) & 0b11;
-    if (ctx.regs.checkCondition(cond)) {
-        JR_imm8(ctx);
+fn JR_cond_imm8(self: *CPU) void {
+    const cond = (self.opcode() >> 3) & 0b11;
+    if (self.checkCondition(cond)) {
+        self.JR_imm8();
     } else {
-        ctx.pc.* += 1; // skip imm8
+        self.regs.PC += 1; // skip imm8
     }
 }
 
@@ -426,8 +561,8 @@ fn JR_cond_imm8(ctx: Context) void {
 ///
 /// Cycles: -
 /// Bytes: 2 (depends on emulator state)
-fn STOP(ctx: Context) void {
-    _ = ctx;
+fn STOP(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -440,12 +575,12 @@ fn STOP(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn LD_r8_r8(ctx: Context) void {
-    const src = ctx.opcode() & 0b111;
-    const dest = (ctx.opcode() >> 3) & 0b111;
-    const value = ctx.getR8(src);
+fn LD_r8_r8(self: *CPU) void {
+    const src = self.opcode() & 0b111;
+    const dest = (self.opcode() >> 3) & 0b111;
+    const value = self.getR8(src);
 
-    ctx.setR8(dest, value);
+    self.setR8(dest, value);
 }
 
 /// 01110110: HALT (LD [HL], [HL]): Enter CPU low-power mode until an interrupt
@@ -465,8 +600,8 @@ fn LD_r8_r8(ctx: Context) void {
 ///
 /// Cycles: -
 /// Bytes: 1
-fn HALT(ctx: Context) void {
-    _ = ctx;
+fn HALT(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -482,8 +617,8 @@ fn HALT(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_A_r8(ctx: Context) void {
-    _ = ctx;
+fn ADD_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -496,8 +631,8 @@ fn ADD_A_r8(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADC_A_r8(ctx: Context) void {
-    _ = ctx;
+fn ADC_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -510,8 +645,8 @@ fn ADC_A_r8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
-fn SUB_A_r8(ctx: Context) void {
-    _ = ctx;
+fn SUB_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -525,8 +660,8 @@ fn SUB_A_r8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (r8 + C) > A)
-fn SBC_A_r8(ctx: Context) void {
-    _ = ctx;
+fn SBC_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -539,8 +674,8 @@ fn SBC_A_r8(ctx: Context) void {
 ///     N=0
 ///     H=1
 ///     C=0
-fn AND_A_r8(ctx: Context) void {
-    _ = ctx;
+fn AND_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -553,8 +688,8 @@ fn AND_A_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn XOR_A_r8(ctx: Context) void {
-    _ = ctx;
+fn XOR_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -567,8 +702,8 @@ fn XOR_A_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn OR_A_r8(ctx: Context) void {
-    _ = ctx;
+fn OR_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -583,8 +718,8 @@ fn OR_A_r8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
-fn CP_A_r8(ctx: Context) void {
-    _ = ctx;
+fn CP_A_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -600,8 +735,8 @@ fn CP_A_r8(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn ADD_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -615,8 +750,8 @@ fn ADD_A_imm8(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADC_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn ADC_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -629,8 +764,8 @@ fn ADC_A_imm8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if imm8 > A)
-fn SUB_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn SUB_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -644,8 +779,8 @@ fn SUB_A_imm8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (imm8 + C) > A)
-fn SBC_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn SBC_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -658,8 +793,8 @@ fn SBC_A_imm8(ctx: Context) void {
 ///     N=0
 ///     H=1
 ///     C=0
-fn AND_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn AND_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -672,8 +807,8 @@ fn AND_A_imm8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn XOR_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn XOR_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -686,8 +821,8 @@ fn XOR_A_imm8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn OR_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn OR_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -701,8 +836,8 @@ fn OR_A_imm8(ctx: Context) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if imm8 > A)
-fn CP_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn CP_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -710,8 +845,8 @@ fn CP_A_imm8(ctx: Context) void {
 ///
 /// Cycles: 5 taken / 2 untaken
 /// Bytes: 1
-fn RET_cond(ctx: Context) void {
-    _ = ctx;
+fn RET_cond(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -719,8 +854,8 @@ fn RET_cond(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RET(ctx: Context) void {
-    _ = ctx;
+fn RET(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -730,8 +865,8 @@ fn RET(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RETI(ctx: Context) void {
-    _ = ctx;
+fn RETI(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -740,8 +875,8 @@ fn RETI(ctx: Context) void {
 ///
 /// Cycles: 4 taken / 3 untaken
 /// Bytes: 3
-fn JP_cond_imm16(ctx: Context) void {
-    _ = ctx;
+fn JP_cond_imm16(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -749,8 +884,8 @@ fn JP_cond_imm16(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 3
-fn JP_imm16(ctx: Context) void {
-    _ = ctx;
+fn JP_imm16(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -758,8 +893,8 @@ fn JP_imm16(ctx: Context) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn JP_HL(ctx: Context) void {
-    _ = ctx;
+fn JP_HL(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -767,8 +902,8 @@ fn JP_HL(ctx: Context) void {
 ///
 /// Cycles: 6 taken / 3 untaken
 /// Bytes: 3
-fn CALL_cond_imm16(ctx: Context) void {
-    _ = ctx;
+fn CALL_cond_imm16(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -778,8 +913,8 @@ fn CALL_cond_imm16(ctx: Context) void {
 ///
 /// Cycles: 6
 /// Bytes: 3
-fn CALL_imm16(ctx: Context) void {
-    _ = ctx;
+fn CALL_imm16(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -787,8 +922,8 @@ fn CALL_imm16(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RST_tgt3(ctx: Context) void {
-    _ = ctx;
+fn RST_tgt3(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -796,8 +931,8 @@ fn RST_tgt3(ctx: Context) void {
 ///
 /// Cycles: 3
 /// Bytes: 1
-fn POP_r16stk(ctx: Context) void {
-    _ = ctx;
+fn POP_r16stk(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -805,15 +940,15 @@ fn POP_r16stk(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn PUSH_r16stk(ctx: Context) void {
-    _ = ctx;
+fn PUSH_r16stk(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
 /// $CB prefix. The next executed instruction is from the $CB bank portion of
 /// the decode ROM. $CB prefix opcodes behave like two-byte opcodes
-fn CB_prefix(ctx: Context) void {
-    _ = ctx;
+fn CB_prefix(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -822,8 +957,8 @@ fn CB_prefix(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LDH_c_A(ctx: Context) void {
-    _ = ctx;
+fn LDH_c_A(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -833,8 +968,8 @@ fn LDH_c_A(ctx: Context) void {
 ///
 /// Cycles: 3
 /// Bytes: 2
-fn LDH_imm8_A(ctx: Context) void {
-    _ = ctx;
+fn LDH_imm8_A(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -843,8 +978,8 @@ fn LDH_imm8_A(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 3
-fn LD_imm16_A(ctx: Context) void {
-    _ = ctx;
+fn LD_imm16_A(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -852,8 +987,8 @@ fn LD_imm16_A(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LDH_A_c(ctx: Context) void {
-    _ = ctx;
+fn LDH_A_c(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -863,8 +998,8 @@ fn LDH_A_c(ctx: Context) void {
 ///
 /// Cycles: 3
 /// Bytes: 2
-fn LDH_A_imm8(ctx: Context) void {
-    _ = ctx;
+fn LDH_A_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -872,8 +1007,8 @@ fn LDH_A_imm8(ctx: Context) void {
 ///
 /// Cycles: 4
 /// Bytes: 3
-fn LD_A_imm16(ctx: Context) void {
-    _ = ctx;
+fn LD_A_imm16(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -886,8 +1021,8 @@ fn LD_A_imm16(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_SP_imm8(ctx: Context) void {
-    _ = ctx;
+fn ADD_SP_imm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -901,8 +1036,8 @@ fn ADD_SP_imm8(ctx: Context) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn LD_HL_SPimm8(ctx: Context) void {
-    _ = ctx;
+fn LD_HL_SPimm8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -910,8 +1045,8 @@ fn LD_HL_SPimm8(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_SP_HL(ctx: Context) void {
-    _ = ctx;
+fn LD_SP_HL(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -919,8 +1054,8 @@ fn LD_SP_HL(ctx: Context) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn DI(ctx: Context) void {
-    _ = ctx;
+fn DI(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -929,8 +1064,8 @@ fn DI(ctx: Context) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn EI(ctx: Context) void {
-    _ = ctx;
+fn EI(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -940,8 +1075,8 @@ fn EI(ctx: Context) void {
 /// these opcodes are not implemented and hard-lock the CPU until the console
 /// is powered off: 0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC,
 /// and 0xFD
-fn Opcode_hole(ctx: Context) void {
-    _ = ctx;
+fn Opcode_hole(self: CPU) void {
+    _ = self;
     @panic("Opcode hole executed - CPU halted");
 }
 
@@ -957,8 +1092,8 @@ fn Opcode_hole(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn RLC_r8(ctx: Context) void {
-    _ = ctx;
+fn RLC_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -971,8 +1106,8 @@ fn RLC_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn RRC_r8(ctx: Context) void {
-    _ = ctx;
+fn RRC_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -985,8 +1120,8 @@ fn RRC_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn RL_r8(ctx: Context) void {
-    _ = ctx;
+fn RL_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -999,8 +1134,8 @@ fn RL_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn RR_r8(ctx: Context) void {
-    _ = ctx;
+fn RR_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1014,8 +1149,8 @@ fn RR_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn SLA_r8(ctx: Context) void {
-    _ = ctx;
+fn SLA_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1029,8 +1164,8 @@ fn SLA_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn SRA_r8(ctx: Context) void {
-    _ = ctx;
+fn SRA_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1043,8 +1178,8 @@ fn SRA_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn SWAP_r8(ctx: Context) void {
-    _ = ctx;
+fn SWAP_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1058,8 +1193,8 @@ fn SWAP_r8(ctx: Context) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn SRL_r8(ctx: Context) void {
-    _ = ctx;
+fn SRL_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1072,8 +1207,8 @@ fn SRL_r8(ctx: Context) void {
 ///     Z=Set if bit b3 is 0
 ///     N=0
 ///     H=1
-fn BIT_b3_r8(ctx: Context) void {
-    _ = ctx;
+fn BIT_b3_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1082,8 +1217,8 @@ fn BIT_b3_r8(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn RES_b3_r8(ctx: Context) void {
-    _ = ctx;
+fn RES_b3_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
@@ -1092,512 +1227,375 @@ fn RES_b3_r8(ctx: Context) void {
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn SET_b3_r8(ctx: Context) void {
-    _ = ctx;
+fn SET_b3_r8(self: CPU) void {
+    _ = self;
     @panic("not implemented");
 }
 
 test "NOP" {
-    var cpu = CPU.init();
     // setup fake RAM
     var RAM: [0x8000]u8 = @splat(0);
-    // Set up a context with a NOP instruction at the current PC
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.PC == 1);
+    var cpu = CPU.init(&RAM);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "LD_r16_imm16" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
     RAM[0] = 0b00000001; // Opcode for LD BC, imm16
     RAM[1] = 0x34; // Low byte
     RAM[2] = 0x12; // High byte
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.B == 0x34); // Low byte
-    try std.testing.expect(cpu.registers.C == 0x12); // High byte
-    try std.testing.expect(cpu.registers.PC == 3);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.B == 0x34); // Low byte
+    try std.testing.expect(cpu.regs.C == 0x12); // High byte
+    try std.testing.expect(cpu.regs.PC == 3);
+
     RAM[3] = 0b00110001; // Opcode for LD SP, imm16
     RAM[4] = 0x78; // Low byte
     RAM[5] = 0x56; // High byte
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.SP == 0x7856);
-    try std.testing.expect(cpu.registers.PC == 6);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.SP == 0x7856);
+    try std.testing.expect(cpu.regs.PC == 6);
 }
 
 test "LD_r16mem_A" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0xAB; // A register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0xAB; // A register
     RAM[0] = 0b00000010; // Opcode for LD (BC), A
-    cpu.registers.B = 0x34; // B register (high byte of BC)
-    cpu.registers.C = 0x12; // C register (low byte of BC)
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
+    cpu.regs.B = 0x34; // B register (high byte of BC)
+    cpu.regs.C = 0x12; // C register (low byte of BC)
+    cpu.execute();
+    cpu.regs.PC += 1;
     try std.testing.expect(RAM[0x3412] == 0xAB);
-    try std.testing.expect(cpu.registers.PC == 1);
+    try std.testing.expect(cpu.regs.PC == 1);
 
     RAM[1] = 0b00100010; // Opcode for LD (HLI), A
-    cpu.registers.H = 0x56; // H register (high byte of HL)
-    cpu.registers.L = 0xFF; // L register (low byte of HL)
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
+    cpu.regs.H = 0x56; // H register (high byte of HL)
+    cpu.regs.L = 0xFF; // L register (low byte of HL)
+    cpu.execute();
+    cpu.regs.PC += 1;
     try std.testing.expect(RAM[0x56FF] == 0xAB);
-    try std.testing.expect(cpu.registers.H == 0x57);
-    try std.testing.expect(cpu.registers.L == 0x00);
-    try std.testing.expect(cpu.registers.PC == 2);
+    try std.testing.expect(cpu.regs.H == 0x57);
+    try std.testing.expect(cpu.regs.L == 0x00);
+    try std.testing.expect(cpu.regs.PC == 2);
+
     RAM[2] = 0b00110010; // Opcode for LD (HLD), A
-    cpu.registers.H = 0x4A; // H register (high byte of HL)
-    cpu.registers.L = 0xBC; // L register (low byte of HL)
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
+    cpu.regs.H = 0x4A; // H register (high byte of HL)
+    cpu.regs.L = 0xBC; // L register (low byte of HL)
+    cpu.execute();
+    cpu.regs.PC += 1;
     try std.testing.expect(RAM[0x4ABC] == 0xAB);
-    try std.testing.expect(cpu.registers.H == 0x4A);
-    try std.testing.expect(cpu.registers.L == 0xBB);
-    try std.testing.expect(cpu.registers.PC == 3);
+    try std.testing.expect(cpu.regs.H == 0x4A);
+    try std.testing.expect(cpu.regs.L == 0xBB);
+    try std.testing.expect(cpu.regs.PC == 3);
 }
 
 test "LD_A_r16mem" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
     RAM[0x3412] = 0xCD;
     RAM[0] = 0b00001010; // Opcode for LD A, (BC)
-    cpu.registers.B = 0x34; // B register (high byte of BC)
-    cpu.registers.C = 0x12; // C register (low byte of BC)
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0xCD); // A register
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.regs.B = 0x34; // B register (high byte of BC)
+    cpu.regs.C = 0x12; // C register (low byte of BC)
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0xCD); // A register
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "LD_imm16_SP" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.SP = 0x9ABC;
+    var cpu = CPU.init(&RAM);
+    cpu.regs.SP = 0x9ABC;
     RAM[0] = 0b00001000; // Opcode for LD (imm16), SP
     RAM[1] = 0x10; // Low byte of imm16
     RAM[2] = 0x80; // High byte of imm16
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
+    cpu.execute();
+    cpu.regs.PC += 1;
     try std.testing.expect(RAM[0x1080] == 0xBC); // Low byte of SP
     try std.testing.expect(RAM[0x1081] == 0x9A); // High byte of SP
-    try std.testing.expect(cpu.registers.PC == 3);
+    try std.testing.expect(cpu.regs.PC == 3);
 }
 
 test "INC_r16" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.B = 0xFF; // B register
-    cpu.registers.C = 0xFF; // C register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.B = 0xFF; // B register
+    cpu.regs.C = 0xFF; // C register
     RAM[0] = 0b00000011; // Opcode for INC BC
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.B == 0x00); // B register
-    try std.testing.expect(cpu.registers.C == 0x00); // C register
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.B == 0x00); // B register
+    try std.testing.expect(cpu.regs.C == 0x00); // C register
+    try std.testing.expect(cpu.regs.PC == 1);
 
-    cpu.registers.SP = 0x1234; // SP
+    cpu.regs.SP = 0x1234; // SP
     RAM[1] = 0b00110011; // Opcode for INC SP
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.SP == 0x1235); // SP
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.SP == 0x1235); // SP
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "DEC_r16" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.B = 0x00; // B register
-    cpu.registers.C = 0x00; // C register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.B = 0x00; // B register
+    cpu.regs.C = 0x00; // C register
     RAM[0] = 0b00001011; // Opcode for DEC BC
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.B == 0xFF); // B register
-    try std.testing.expect(cpu.registers.C == 0xFF); // C register
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.B == 0xFF); // B register
+    try std.testing.expect(cpu.regs.C == 0xFF); // C register
+    try std.testing.expect(cpu.regs.PC == 1);
 
-    cpu.registers.SP = 0x0000; // SP
+    cpu.regs.SP = 0x0000; // SP
     RAM[1] = 0b00111011; // Opcode for DEC SP
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.SP == 0xFFFF); // SP
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.SP == 0xFFFF); // SP
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "ADD_HL_r16" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.H = 0x1F; // H register
-    cpu.registers.L = 0x34; // L register
-    cpu.registers.B = 0x01; // B register
-    cpu.registers.C = 0x10; // C register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.H = 0x1F; // H register
+    cpu.regs.L = 0x34; // L register
+    cpu.regs.B = 0x01; // B register
+    cpu.regs.C = 0x10; // C register
     RAM[0] = 0b00001001; // Opcode for ADD HL, BC
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.H == 0x20);
-    try std.testing.expect(cpu.registers.L == 0x44);
-    try std.testing.expect(cpu.registers.F == 0b00100000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.H == 0x20);
+    try std.testing.expect(cpu.regs.L == 0x44);
+    try std.testing.expect(cpu.regs.F == 0b00100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 
-    cpu.registers.F = 0b10100000;
-    cpu.registers.H = 0xFF; // H register
-    cpu.registers.L = 0xFF; // L register
-    cpu.registers.D = 0x00; // D register
-    cpu.registers.E = 0x01; // E register
+    cpu.regs.F = 0b10100000;
+    cpu.regs.H = 0xFF; // H register
+    cpu.regs.L = 0xFF; // L register
+    cpu.regs.D = 0x00; // D register
+    cpu.regs.E = 0x01; // E register
     RAM[1] = 0b00011001; // Opcode for ADD HL, DE
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.H == 0x00);
-    try std.testing.expect(cpu.registers.L == 0x00);
-    try std.testing.expect(cpu.registers.F == 0b10110000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.H == 0x00);
+    try std.testing.expect(cpu.regs.L == 0x00);
+    try std.testing.expect(cpu.regs.F == 0b10110000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "INC_r8" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0xFF; // A register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0xFF; // A register
     RAM[0] = 0b00111100; // Opcode for INC A
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0x00); // A register
-    try std.testing.expect(cpu.registers.F == 0b10100000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x00); // A register
+    try std.testing.expect(cpu.regs.F == 0b10100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "DEC_r8" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0x00; // A register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x00; // A register
     RAM[0] = 0b00111101; // Opcode for DEC A
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0xFF); // A register
-    try std.testing.expect(cpu.registers.F == 0b01100000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0xFF); // A register
+    try std.testing.expect(cpu.regs.F == 0b01100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "LD_r8_imm8" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
     RAM[0] = 0b00000110; // Opcode for LD B, imm8
     RAM[1] = 0x7A; // imm8 value
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.B == 0x7A); // B register
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.B == 0x7A); // B register
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "RLCA" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0b10000001; // A register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b10000001; // A register
     RAM[0] = 0b00000111; // Opcode for RLCA
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0b00000011); // A register
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b00000011); // A register
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "RRCA" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0b00000011; // A register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b00000011; // A register
     RAM[0] = 0b00001111; // Opcode for RRCA
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0b10000001); // A register
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b10000001); // A register
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "RLA" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0b10000001; // A register
-    cpu.registers.F = 0b00010000; // Set Carry flag
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b10000001; // A register
+    cpu.regs.F = 0b00010000; // Set Carry flag
     RAM[0] = 0b00010111; // Opcode for RLA
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0b00000011); // A register
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b00000011); // A register
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "RRA" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0b00000011; // A register
-    cpu.registers.F = 0b00010000; // Set Carry flag
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b00000011; // A register
+    cpu.regs.F = 0b00010000; // Set Carry flag
     RAM[0] = 0b00011111; // Opcode for RRA
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0b10000001); // A register
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b10000001); // A register
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "DAA" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0x98; // A register
-    cpu.registers.F = 0b01110000; // Clear all flags
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x98; // A register
+    cpu.regs.F = 0b01110000; // Clear all flags
     RAM[0] = 0b00100111; // Opcode for DAA
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0x98 - 0x66);
-    try std.testing.expect(cpu.registers.F == 0b01010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x98 - 0x66);
+    try std.testing.expect(cpu.regs.F == 0b01010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 
-    cpu.registers.A = 0x12; // A register
-    cpu.registers.F = 0b00110000; // Set N flag
+    cpu.regs.A = 0x12; // A register
+    cpu.regs.F = 0b00110000; // Set N flag
     RAM[1] = 0b00100111; // Opcode for DAA
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0x12 + 0x66);
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x12 + 0x66);
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "CPL" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.A = 0b10101010; // A register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b10101010; // A register
     RAM[0] = 0b00101111; // Opcode for CPL
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.A == 0b01010101); // A register
-    try std.testing.expect(cpu.registers.F == 0b01100000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b01010101); // A register
+    try std.testing.expect(cpu.regs.F == 0b01100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "SCF" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.F = 0b00000000; // Clear all flags
+    var cpu = CPU.init(&RAM);
+    cpu.regs.F = 0b00000000; // Clear all flags
     RAM[0] = 0b00110111; // Opcode for SCF
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 }
 
 test "CCF" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.F = 0b00010000; // Set Carry flag
+    var cpu = CPU.init(&RAM);
+    cpu.regs.F = 0b00010000; // Set Carry flag
     RAM[0] = 0b00111111; // Opcode for CCF
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.F == 0b00000000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
 
     RAM[1] = 0b00111111; // Opcode for CCF
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "JR_imm8" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
     RAM[0] = 0b00011000; // Opcode for JR imm8
     RAM[1] = 0x05; // imm8 value
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.PC == 0x07); // PC should be 0 + 2 + 5
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.PC == 0x07); // PC should be 0 + 2 + 5
 
     RAM[8] = @bitCast(@as(i8, -2)); // imm8 value to jump back
     RAM[7] = 0b00011000; // Opcode for JR imm8
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.PC == 0x07); // PC should be 7 + 2 - 2
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.PC == 0x07); // PC should be 7 + 2 - 2
 }
 
 test "JR_cond_imm8" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
     RAM[0] = 0b00100000; // Opcode for JR NZ, imm8
     RAM[1] = 0x04; // imm8 value
-    cpu.registers.F = 0b00000000; // Z flag not set
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.PC == 0x06); // PC should be 0 + 2 + 4
+    cpu.regs.F = 0b00000000; // Z flag not set
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.PC == 0x06); // PC should be 0 + 2 + 4
 
     RAM[6] = 0b00100000; // Opcode for JR NZ, imm8
     RAM[7] = 0x04; // imm8 value
-    cpu.registers.F = 0b10000000; // Z flag set
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.PC == 0x08); // PC should be 6 + 2
+    cpu.regs.F = 0b10000000; // Z flag set
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.PC == 0x08); // PC should be 6 + 2
 }
 
 test "LD_r8_r8" {
-    var cpu = CPU.init();
     var RAM: [0x8000]u8 = @splat(0);
-    cpu.registers.B = 0x56; // B register
+    var cpu = CPU.init(&RAM);
+    cpu.regs.B = 0x56; // B register
     RAM[0] = 0b01000000; // Opcode for LD B, B
-    const ctx = Context{
-        .RAM = &RAM,
-        .regs = &cpu.registers,
-        .pc = &cpu.registers.PC,
-        .sp = &cpu.registers.SP,
-    };
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.B == 0x56); // B register
-    try std.testing.expect(cpu.registers.PC == 1);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.B == 0x56); // B register
+    try std.testing.expect(cpu.regs.PC == 1);
 
-    cpu.registers.C = 0x78; // C register
+    cpu.regs.C = 0x78; // C register
     RAM[1] = 0b01000001; // Opcode for LD B, C
-    cpu.execute(ctx);
-    ctx.pc.* += 1;
-    try std.testing.expect(cpu.registers.B == 0x78); // B register
-    try std.testing.expect(cpu.registers.PC == 2);
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.B == 0x78); // B register
+    try std.testing.expect(cpu.regs.PC == 2);
 }
 
 test "HALT" {
-    // var cpu = CPU.init();
     // var RAM: [0x8000]u8 = @splat(0);
+    // var cpu = CPU.init(&RAM);
     // RAM[0] = 0b01110110; // Opcode for HALT
-    // const ctx = Context{
-    //     .RAM = &RAM,
-    //     .regs = &cpu.registers,
-    //     .pc = &cpu.registers.PC,
-    //     .sp = &cpu.registers.SP,
-    // };
-    // cpu.execute(ctx);
-    // ctx.pc.* += 1;
+    // cpu.execute();
+    // cpu.regs.PC += 1;
     // try std.testing.expect(cpu.halted == true);
     // try std.testing.expect(cpu.registers.PC == 1);
 }

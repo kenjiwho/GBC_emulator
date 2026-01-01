@@ -4,11 +4,11 @@ const GB = @import("GB.zig");
 pub fn main() !void {
     var gb = GB.init();
 
-    std.debug.print("{d}\n", .{gb.cpu.registers.PC});
+    std.debug.print("{d}\n", .{gb.cpu.regs.PC});
 
     gb.cycle();
 
-    std.debug.print("{d}\n", .{gb.cpu.registers.PC});
+    std.debug.print("{d}\n", .{gb.cpu.regs.PC});
 }
 
 test {
@@ -19,5 +19,5 @@ test "context" {
     var gb = GB.init();
     gb.cycle();
 
-    try std.testing.expect(gb.cpu.registers.PC == 1);
+    try std.testing.expect(gb.cpu.regs.PC == 1);
 }
