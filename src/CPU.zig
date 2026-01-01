@@ -5,7 +5,7 @@ const std = @import("std");
 const Registers = @import("Registers.zig");
 
 // opcode function type
-const DispatchFn = *const fn (self: *CPU) void;
+const DispatchFn = *const fn (self: *CPU, opcode: u8) void;
 
 regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
 RAM: []u8, // reference to the system RAM so instructions can read/write memory
@@ -21,12 +21,13 @@ pub fn init(RAM: []u8) CPU {
 }
 
 pub fn execute(self: *CPU) void {
-    self.dispatch_ptr_tbl[(self.opcode() >> 6)](self);
+    const opcode = self.getOpcode();
+    self.dispatch_ptr_tbl[(opcode >> 6)](self, opcode);
 }
 
 // --------------------------------- opcode dispatchers --------------------
-fn dispatch0(self: *CPU) void {
-    switch (self.opcode()) { // full opcode
+fn dispatch0(self: *CPU, opcode: u8) void {
+    switch (opcode) { // full opcode
         0x00 => self.NOP(),
         0x08 => self.LD_imm16_SP(),
         0x18 => self.JR_imm8(),
@@ -41,7 +42,7 @@ fn dispatch0(self: *CPU) void {
         0x3F => self.CCF(),
         0x20, 0x28, 0x30, 0x38 => self.JR_cond_imm8(),
         else => {
-            switch (self.opcode() & 0xF) { // lower 4 bits
+            switch (opcode & 0xF) { // lower 4 bits
                 0x1 => self.LD_r16_imm16(),
                 0x2 => self.LD_r16mem_A(),
                 0x3 => self.INC_r16(),
@@ -56,22 +57,59 @@ fn dispatch0(self: *CPU) void {
         },
     }
 }
-fn dispatch1(self: *CPU) void {
-    switch (self.opcode()) { // full opcode
+fn dispatch1(self: *CPU, opcode: u8) void {
+    switch (opcode) { // full opcode
         0x76 => self.HALT(),
         else => self.LD_r8_r8(),
     }
 }
-fn dispatch2(self: *CPU) void {
-    _ = self;
+fn dispatch2(self: *CPU, opcode: u8) void {
+    switch (opcode >> 3) { // upper 5 bits
+        0b10000 => self.ADD_A_r8(),
+        0b10001 => self.ADC_A_r8(),
+        0b10010 => self.SUB_A_r8(),
+        0b10011 => self.SBC_A_r8(),
+        0b10100 => self.AND_A_r8(),
+        0b10101 => self.XOR_A_r8(),
+        0b10110 => self.OR_A_r8(),
+        0b10111 => self.CP_A_r8(),
+        else => unreachable,
+    }
 }
-fn dispatch3(self: *CPU) void {
-    _ = self;
+fn dispatch3(self: *CPU, opcode: u8) void {
+    switch (opcode) { // full opcode
+        0xC6 => self.ADD_A_imm8(),
+        0xCE => self.ADC_A_imm8(),
+        0xD6 => self.SUB_A_imm8(),
+        0xDE => self.SBC_A_imm8(),
+        0xE6 => self.AND_A_imm8(),
+        0xEE => self.XOR_A_imm8(),
+        0xF6 => self.OR_A_imm8(),
+        0xFE => self.CP_A_imm8(),
+        0xC9 => self.RET(),
+        0xD9 => self.RETI(),
+        0xC3 => self.JP_imm16(),
+        0xE9 => self.JP_HL(),
+        0xCD => self.CALL_imm16(),
+        0xCB => self.CB_prefix(),
+        0xE2 => self.LDH_c_A(),
+        0xE0 => self.LDH_imm8_A(),
+        0xEA => self.LD_imm16_A(),
+        0xF2 => self.LDH_A_c(),
+        0xF0 => self.LDH_A_imm8(),
+        0xFA => self.LD_A_imm16(),
+        0xE8 => self.ADD_SP_imm8(),
+        0xF8 => self.LD_HL_SPimm8(),
+        0xF9 => self.LD_SP_HL(),
+        0xF3 => self.DI(),
+        0xFB => self.EI(),
+        else => unreachable,
+    }
 }
 
 // --------------------------------- helper functions ----------------------
 /// Fetches the opcode at the current PC
-fn opcode(self: *const CPU) u8 {
+fn getOpcode(self: *const CPU) u8 {
     return self.RAM[self.regs.PC];
 }
 
@@ -138,7 +176,7 @@ fn setR8(self: *CPU, register: u3, value: u8) void {
 }
 
 /// Gets the value of a 16-bit register pair using an index
-fn getR16(self: CPU, register: u2) u16 {
+fn getR16(self: *const CPU, register: u2) u16 {
     return switch (register) {
         0 => self.regs.getBC(),
         1 => self.regs.getDE(),
@@ -176,12 +214,12 @@ fn getR16mem(self: *CPU, register: u2) u16 {
 }
 
 /// Fetches a 8-bit immediate value from the instruction stream
-fn getImm8(self: CPU, T: type) T {
+fn getImm8(self: *const CPU, T: type) T {
     return @bitCast(self.RAM[self.regs.PC + 1]);
 }
 
 /// Fetches a 16-bit immediate value from the instruction stream
-fn getImm16(self: CPU) u16 {
+fn getImm16(self: *const CPU) u16 {
     return (@as(u16, self.RAM[self.regs.PC + 1]) << 8) | self.RAM[self.regs.PC + 2];
 }
 
@@ -193,7 +231,7 @@ fn getImm16(self: CPU) u16 {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn NOP(self: CPU) void {
+fn NOP(self: *const CPU) void {
     _ = self;
 }
 
@@ -202,7 +240,7 @@ fn NOP(self: CPU) void {
 /// Cycles: 3
 /// Bytes: 3
 fn LD_r16_imm16(self: *CPU) void {
-    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const imm16 = self.getImm16();
 
     self.setR16(r16, imm16);
@@ -215,7 +253,7 @@ fn LD_r16_imm16(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_r16mem_A(self: *CPU) void {
-    const r16mem: u2 = @intCast((self.opcode() >> 4) & 0b11);
+    const r16mem: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
     self.RAM[addr] = self.regs.A;
@@ -227,7 +265,7 @@ fn LD_r16mem_A(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_A_r16mem(self: *CPU) void {
-    const r16mem: u2 = @intCast((self.opcode() >> 4) & 0b11);
+    const r16mem: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
     self.regs.A = self.RAM[addr];
@@ -250,7 +288,7 @@ fn LD_imm16_SP(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn INC_r16(self: *CPU) void {
-    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const new_val = self.getR16(r16) +% 1;
 
     self.setR16(r16, new_val);
@@ -261,7 +299,7 @@ fn INC_r16(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn DEC_r16(self: *CPU) void {
-    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const new_val = self.getR16(r16) -% 1;
 
     self.setR16(r16, new_val);
@@ -276,11 +314,11 @@ fn DEC_r16(self: *CPU) void {
 ///     H=Set if overflow from bit 11
 ///     C=Set if overflow from bit 15
 fn ADD_HL_r16(self: *CPU) void {
-    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const val = self.getR16(r16);
 
     const hl = self.regs.getHL();
-    const new_hl, const c: u8 = @addWithOverflow(hl, val); // add with carry flag
+    const new_hl, const c = @addWithOverflow(hl, val); // add with carry flag
 
     self.regs.setHL(new_hl); // set HL register
     self.setFlag(.N, false);
@@ -297,7 +335,7 @@ fn ADD_HL_r16(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 fn INC_r8(self: *CPU) void {
-    const r8: u3 = @intCast((self.opcode() >> 3) & 0b111);
+    const r8: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val +% 1;
 
@@ -316,7 +354,7 @@ fn INC_r8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 fn DEC_r8(self: *CPU) void {
-    const r8: u3 = @intCast((self.opcode() >> 3) & 0b111);
+    const r8: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val -% 1;
 
@@ -331,7 +369,7 @@ fn DEC_r8(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_imm8(self: *CPU) void {
-    const r8: u3 = @intCast((self.opcode() >> 3) & 0b111);
+    const r8: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
     const imm8 = self.getImm8(u8);
 
     self.setR8(r8, imm8);
@@ -531,7 +569,7 @@ fn JR_imm8(self: *CPU) void {
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
 fn JR_cond_imm8(self: *CPU) void {
-    const cond: u2 = @intCast((self.opcode() >> 3) & 0b11);
+    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
     if (self.checkCondition(cond)) {
         self.JR_imm8();
     } else {
@@ -544,7 +582,7 @@ fn JR_cond_imm8(self: *CPU) void {
 ///
 /// Cycles: -
 /// Bytes: 2 (depends on emulator state)
-fn STOP(self: CPU) void {
+fn STOP(self: *const CPU) void {
     _ = self;
     @panic("not implemented");
 }
@@ -559,8 +597,15 @@ fn STOP(self: CPU) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_r8(self: *CPU) void {
-    const src: u3 = @intCast(self.opcode() & 0b111);
-    const dest: u3 = @intCast((self.opcode() >> 3) & 0b111);
+    const src: u3 = @intCast(self.getOpcode() & 0b111);
+    const dest: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
+
+    // if both src and dest are [HL], this is the HALT instruction
+    if (src == 6 and dest == 6) {
+        self.HALT();
+        return;
+    }
+
     const value = self.getR8(src);
 
     self.setR8(dest, value);
@@ -583,7 +628,7 @@ fn LD_r8_r8(self: *CPU) void {
 ///
 /// Cycles: -
 /// Bytes: 1
-fn HALT(self: CPU) void {
+fn HALT(self: *const CPU) void {
     _ = self;
     @panic("not implemented");
 }
@@ -600,9 +645,16 @@ fn HALT(self: CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn ADD_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+    const old_a = self.regs.A;
+
+    self.regs.A, const c = @addWithOverflow(old_a, value);
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, ((old_a & 0x0F) + (value & 0x0F)) > 0x0F);
+    self.setFlag(.C, c == 1);
 }
 
 /// 10001[r8]: ADC A, r8: Add the value in r8 and the carry flag to register A
@@ -614,9 +666,19 @@ fn ADD_A_r8(self: CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADC_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn ADC_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+    const carry = @intFromBool(self.getFlag(.C));
+    const old_a = self.regs.A;
+
+    const sum = @as(u9, old_a) + value + carry;
+
+    self.regs.A = @truncate(sum); // wrap back to u8
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, ((old_a & 0x0F) + (value & 0x0F) + carry) > 0x0F);
+    self.setFlag(.C, sum > 0xFF);
 }
 
 /// 10010[r8]: SUB A, r8: Subtract the value in r8 from register A
@@ -628,9 +690,16 @@ fn ADC_A_r8(self: CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
-fn SUB_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SUB_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+    const old_a = self.regs.A;
+
+    self.regs.A, const c = @subWithOverflow(old_a, value);
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, (old_a & 0x0F) < (value & 0x0F));
+    self.setFlag(.C, c == 1);
 }
 
 /// 10011[r8]: SBC A, r8: Subtract the value in r8 and the carry flag from
@@ -643,12 +712,23 @@ fn SUB_A_r8(self: CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (r8 + C) > A)
-fn SBC_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SBC_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+    const carry = @intFromBool(self.getFlag(.C));
+    const old_a = self.regs.A;
+
+    const sum = @as(i16, old_a) - value - carry;
+    const half_check = (@as(i16, old_a) & 0xF) - (value & 0xF) - carry;
+
+    self.regs.A = @truncate(@as(u16, @bitCast(sum))); // wrap back to u8
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, half_check < 0);
+    self.setFlag(.C, sum < 0);
 }
 
-/// 10100[r8]: AND A, r8: A = A & r8 (bitwise AND)
+/// 10100[r8]: AND A, r8: A = A & val(r8) (bitwise AND)
 ///
 /// Cycles: 1
 /// Bytes: 1
@@ -657,12 +737,18 @@ fn SBC_A_r8(self: CPU) void {
 ///     N=0
 ///     H=1
 ///     C=0
-fn AND_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn AND_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+
+    self.regs.A = self.regs.A & value;
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, true);
+    self.setFlag(.C, false);
 }
 
-/// 10101[r8]: XOR A, r8: A = A ^ r8 (bitwise XOR)
+/// 10101[r8]: XOR A, r8: A = A ^ val(r8) (bitwise XOR)
 ///
 /// Cycles: 1
 /// Bytes: 1
@@ -671,12 +757,18 @@ fn AND_A_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn XOR_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn XOR_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+
+    self.regs.A = self.regs.A ^ value;
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, false);
 }
 
-/// 10110[r8]: OR A, r8: A = A | r8 (bitwise OR)
+/// 10110[r8]: OR A, r8: A = A | val(r8) (bitwise OR)
 ///
 /// Cycles: 1
 /// Bytes: 1
@@ -685,12 +777,18 @@ fn XOR_A_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn OR_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn OR_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+
+    self.regs.A = self.regs.A | value;
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, false);
 }
 
-/// 10111[r8]: CP A, r8: ComPare valur in register A with value in r8.
+/// 10111[r8]: CP A, r8: ComPare value in register A with value in r8.
 /// This subtracts r8 from A and sets flags accordingly, but discards the
 /// result.
 ///
@@ -701,9 +799,16 @@ fn OR_A_r8(self: CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
-fn CP_A_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn CP_A_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const value = self.getR8(r8);
+    const old_a = self.regs.A;
+
+    const res, const c = @subWithOverflow(old_a, value);
+    self.setFlag(.Z, res == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, (old_a & 0x0F) < (value & 0x0F));
+    self.setFlag(.C, c == 1);
 }
 
 // ------------------------------- end block 2 --------------------------------
@@ -1555,6 +1660,16 @@ test "JR_cond_imm8" {
     try std.testing.expect(cpu.regs.PC == 0x08); // PC should be 6 + 2
 }
 
+test "STOP" {
+    // var RAM: [0x8000]u8 = @splat(0);
+    // var cpu = CPU.init(&RAM);
+    // RAM[0] = 0b01110110; // Opcode for HALT
+    // cpu.execute();
+    // cpu.regs.PC += 1;
+    // try std.testing.expect(cpu.halted == true);
+    // try std.testing.expect(cpu.registers.PC == 1);
+}
+
 test "LD_r8_r8" {
     var RAM: [0x8000]u8 = @splat(0);
     var cpu = CPU.init(&RAM);
@@ -1583,4 +1698,150 @@ test "HALT" {
     // cpu.regs.PC += 1;
     // try std.testing.expect(cpu.halted == true);
     // try std.testing.expect(cpu.registers.PC == 1);
+}
+
+test "ADD_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x14;
+    cpu.regs.B = 0x28;
+    RAM[0] = 0b10000000; // Opcode for ADD A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x3C); // A register
+    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+
+    RAM[1] = 0b10000000; // Opcode for ADD A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x64); // A register
+    try std.testing.expect(cpu.regs.F == 0b00100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
+}
+
+test "ADC_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x14;
+    cpu.regs.B = 0x28;
+    cpu.regs.F = 0b00010000; // Set Carry flag
+    RAM[0] = 0b10001000; // Opcode for ADC A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x3D);
+    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+
+    RAM[1] = 0b10001000; // Opcode for ADC A, B
+    cpu.regs.B = 0xC2;
+    cpu.regs.F = 0b00110000; // Set Carry flag
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x00);
+    try std.testing.expect(cpu.regs.F == 0b10110000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
+}
+
+test "SUB_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x50;
+    cpu.regs.B = 0x20;
+    RAM[0] = 0b10010000; // Opcode for SUB A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x30); // A register
+    try std.testing.expect(cpu.regs.F == 0b01000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+
+    RAM[1] = 0b10010000; // Opcode for SUB A, B
+    cpu.regs.B = 0x01;
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x2F); // A register
+    try std.testing.expect(cpu.regs.F == 0b01100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
+}
+
+test "SBC_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x50;
+    cpu.regs.B = 0x20;
+    RAM[0] = 0b10011000; // Opcode for SBC A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x30); // A register
+    try std.testing.expect(cpu.regs.F == 0b01000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+
+    RAM[1] = 0b10011000; // Opcode for SBC A, B
+    cpu.regs.B = 0x30;
+    cpu.regs.F = 0b01110000; // Set Carry flag
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0xFF); // A register
+    try std.testing.expect(cpu.regs.F == 0b01110000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
+}
+
+test "AND_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b11001100;
+    cpu.regs.B = 0b10101010;
+    RAM[0] = 0b10100000; // Opcode for AND A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b10001000); // A register
+    try std.testing.expect(cpu.regs.F == 0b00100000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+}
+
+test "XOR_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b11001100;
+    cpu.regs.B = 0b10101010;
+    RAM[0] = 0b10101000; // Opcode for XOR A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b01100110); // A register
+    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+}
+
+test "OR_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0b11001100;
+    cpu.regs.B = 0b10101010;
+    RAM[0] = 0b10110000; // Opcode for OR A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0b11101110); // A register
+    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+}
+
+test "CP_A_r8" {
+    var RAM: [0x8000]u8 = @splat(0);
+    var cpu = CPU.init(&RAM);
+    cpu.regs.A = 0x50;
+    cpu.regs.B = 0x20;
+    RAM[0] = 0b10111000; // Opcode for CP A, B
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x50); // A register unchanged
+    try std.testing.expect(cpu.regs.F == 0b01000000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 1);
+
+    RAM[1] = 0b10111000; // Opcode for CP A, B
+    cpu.regs.B = 0x60;
+    cpu.execute();
+    cpu.regs.PC += 1;
+    try std.testing.expect(cpu.regs.A == 0x50); // A register unchanged
+    try std.testing.expect(cpu.regs.F == 0b01010000); // Check Flags
+    try std.testing.expect(cpu.regs.PC == 2);
 }
