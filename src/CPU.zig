@@ -71,12 +71,12 @@ fn dispatch3(self: *CPU) void {
 
 // --------------------------------- helper functions ----------------------
 /// Fetches the opcode at the current PC
-fn opcode(self: CPU) u8 {
+fn opcode(self: *const CPU) u8 {
     return self.RAM[self.regs.PC];
 }
 
 /// Gets flag from flags register
-fn getFlag(self: CPU, flag: Registers.Flag) bool {
+fn getFlag(self: *const CPU, flag: Registers.Flag) bool {
     const bit: u3 = @intFromEnum(flag);
 
     return ((self.regs.F >> bit) & 0b1) == 1;
@@ -94,19 +94,18 @@ fn setFlag(self: *CPU, flag: Registers.Flag, value: bool) void {
 }
 
 /// Check a condition code
-fn checkCondition(self: CPU, condition: u8) bool {
+fn checkCondition(self: *const CPU, condition: u2) bool {
     return switch (condition) {
         0 => !self.getFlag(.Z), // NZ
         1 => self.getFlag(.Z), // Z
         2 => !self.getFlag(.C), // NC
         3 => self.getFlag(.C), // C
-        else => unreachable,
     };
 }
 
-/// Gets the value of an 8-bit register
-fn getR8(self: CPU, r8: u8) u8 {
-    return switch (r8) {
+/// Gets the value of an 8-bit register using an index
+fn getR8(self: *const CPU, register: u3) u8 {
+    return switch (register) {
         0 => self.regs.B,
         1 => self.regs.C,
         2 => self.regs.D,
@@ -114,17 +113,16 @@ fn getR8(self: CPU, r8: u8) u8 {
         4 => self.regs.H,
         5 => self.regs.L,
         6 => { // read from memory pointed to by HL
-            const addr = self.getR16(2); // HL
+            const addr = self.regs.getHL();
             return self.RAM[addr];
         },
         7 => self.regs.A,
-        else => unreachable,
     };
 }
 
-/// Sets the value of an 8-bit register
-fn setR8(self: *CPU, r8: u8, value: u8) void {
-    switch (r8) {
+/// Sets the value of an 8-bit register using an index
+fn setR8(self: *CPU, register: u3, value: u8) void {
+    switch (register) {
         0 => self.regs.B = value,
         1 => self.regs.C = value,
         2 => self.regs.D = value,
@@ -132,63 +130,48 @@ fn setR8(self: *CPU, r8: u8, value: u8) void {
         4 => self.regs.H = value,
         5 => self.regs.L = value,
         6 => { // write to memory pointed to by HL
-            const addr = self.getR16(2); // HL
+            const addr = self.regs.getHL();
             self.RAM[addr] = value;
         },
         7 => self.regs.A = value,
-        else => unreachable,
     }
 }
 
-/// Gets the value of a 16-bit register pair
-fn getR16(self: CPU, r16: u8) u16 {
-    return switch (r16) {
-        0 => (@as(u16, self.regs.B) << 8) | self.regs.C,
-        1 => (@as(u16, self.regs.D) << 8) | self.regs.E,
-        2 => (@as(u16, self.regs.H) << 8) | self.regs.L,
+/// Gets the value of a 16-bit register pair using an index
+fn getR16(self: CPU, register: u2) u16 {
+    return switch (register) {
+        0 => self.regs.getBC(),
+        1 => self.regs.getDE(),
+        2 => self.regs.getHL(),
         3 => self.regs.SP,
-        else => unreachable,
     };
 }
 
-/// Sets the value of a 16-bit register pair
-fn setR16(self: *CPU, r16: u8, value: u16) void {
-    switch (r16) {
-        0 => {
-            self.regs.B = @intCast(value >> 8);
-            self.regs.C = @intCast(value & 0xFF);
-        },
-        1 => {
-            self.regs.D = @intCast(value >> 8);
-            self.regs.E = @intCast(value & 0xFF);
-        },
-        2 => {
-            self.regs.H = @intCast(value >> 8);
-            self.regs.L = @intCast(value & 0xFF);
-        },
-        3 => {
-            self.regs.SP = value;
-        },
-        else => unreachable,
+/// Sets the value of a 16-bit register pair using an index
+fn setR16(self: *CPU, register: u2, value: u16) void {
+    switch (register) {
+        0 => self.regs.setBC(value),
+        1 => self.regs.setDE(value),
+        2 => self.regs.setHL(value),
+        3 => self.regs.SP = value,
     }
 }
 
-/// Gets the address pointed to by a 16-bit register pair, with optional
-/// increment/decrement for HL.
-fn getR16mem(self: *CPU, r16mem: u8) u16 {
-    return switch (r16mem) {
-        0, 1 => self.getR16(r16mem),
+/// Gets the address pointed to by a 16-bit register pair using an index, with
+/// optional increment/decrement for HL.
+fn getR16mem(self: *CPU, register: u2) u16 {
+    return switch (register) {
+        0, 1 => self.getR16(register), // BC or DE
         2 => { // HLI
-            const addr = self.getR16(2); // HL
-            self.setR16(2, addr +% 1);
+            const addr = self.regs.getHL();
+            self.regs.setHL(addr +% 1);
             return addr;
         },
         3 => { // HLD
-            const addr = self.getR16(2); // HL
-            self.setR16(2, addr -% 1);
+            const addr = self.regs.getHL();
+            self.regs.setHL(addr -% 1);
             return addr;
         },
-        else => unreachable,
     };
 }
 
@@ -219,7 +202,7 @@ fn NOP(self: CPU) void {
 /// Cycles: 3
 /// Bytes: 3
 fn LD_r16_imm16(self: *CPU) void {
-    const r16 = (self.opcode() >> 4) & 0b11;
+    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
     const imm16 = self.getImm16();
 
     self.setR16(r16, imm16);
@@ -232,7 +215,7 @@ fn LD_r16_imm16(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_r16mem_A(self: *CPU) void {
-    const r16mem = (self.opcode() >> 4) & 0b11;
+    const r16mem: u2 = @intCast((self.opcode() >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
     self.RAM[addr] = self.regs.A;
@@ -244,7 +227,7 @@ fn LD_r16mem_A(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_A_r16mem(self: *CPU) void {
-    const r16mem = (self.opcode() >> 4) & 0b11;
+    const r16mem: u2 = @intCast((self.opcode() >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
     self.regs.A = self.RAM[addr];
@@ -267,7 +250,7 @@ fn LD_imm16_SP(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn INC_r16(self: *CPU) void {
-    const r16 = (self.opcode() >> 4) & 0b11;
+    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
     const new_val = self.getR16(r16) +% 1;
 
     self.setR16(r16, new_val);
@@ -278,7 +261,7 @@ fn INC_r16(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn DEC_r16(self: *CPU) void {
-    const r16 = (self.opcode() >> 4) & 0b11;
+    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
     const new_val = self.getR16(r16) -% 1;
 
     self.setR16(r16, new_val);
@@ -293,13 +276,13 @@ fn DEC_r16(self: *CPU) void {
 ///     H=Set if overflow from bit 11
 ///     C=Set if overflow from bit 15
 fn ADD_HL_r16(self: *CPU) void {
-    const r16 = (self.opcode() >> 4) & 0b11;
+    const r16: u2 = @intCast((self.opcode() >> 4) & 0b11);
     const val = self.getR16(r16);
 
-    const hl = self.getR16(2);
+    const hl = self.regs.getHL();
     const new_hl, const c: u8 = @addWithOverflow(hl, val); // add with carry flag
 
-    self.setR16(2, new_hl); // set HL register
+    self.regs.setHL(new_hl); // set HL register
     self.setFlag(.N, false);
     self.setFlag(.H, ((@as(u32, hl) & 0x0FFF) + (@as(u32, val) & 0x0FFF)) > 0x0FFF);
     self.setFlag(.C, c == 1);
@@ -314,7 +297,7 @@ fn ADD_HL_r16(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 fn INC_r8(self: *CPU) void {
-    const r8 = (self.opcode() >> 3) & 0b111;
+    const r8: u3 = @intCast((self.opcode() >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val +% 1;
 
@@ -333,7 +316,7 @@ fn INC_r8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 fn DEC_r8(self: *CPU) void {
-    const r8 = (self.opcode() >> 3) & 0b111;
+    const r8: u3 = @intCast((self.opcode() >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val -% 1;
 
@@ -348,7 +331,7 @@ fn DEC_r8(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_imm8(self: *CPU) void {
-    const r8 = (self.opcode() >> 3) & 0b111;
+    const r8: u3 = @intCast((self.opcode() >> 3) & 0b111);
     const imm8 = self.getImm8(u8);
 
     self.setR8(r8, imm8);
@@ -548,7 +531,7 @@ fn JR_imm8(self: *CPU) void {
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
 fn JR_cond_imm8(self: *CPU) void {
-    const cond = (self.opcode() >> 3) & 0b11;
+    const cond: u2 = @intCast((self.opcode() >> 3) & 0b11);
     if (self.checkCondition(cond)) {
         self.JR_imm8();
     } else {
@@ -576,8 +559,8 @@ fn STOP(self: CPU) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_r8(self: *CPU) void {
-    const src = self.opcode() & 0b111;
-    const dest = (self.opcode() >> 3) & 0b111;
+    const src: u3 = @intCast(self.opcode() & 0b111);
+    const dest: u3 = @intCast((self.opcode() >> 3) & 0b111);
     const value = self.getR8(src);
 
     self.setR8(dest, value);
@@ -1588,6 +1571,8 @@ test "LD_r8_r8" {
     cpu.regs.PC += 1;
     try std.testing.expect(cpu.regs.B == 0x78); // B register
     try std.testing.expect(cpu.regs.PC == 2);
+
+    cpu.setR16(2, 0x9A); // DE register
 }
 
 test "HALT" {
