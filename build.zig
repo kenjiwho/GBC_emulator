@@ -4,14 +4,21 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const exe_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{},
+    });
+
     const exe = b.addExecutable(.{
         .name = "GB_emulator",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{},
-        }),
+        .root_module = exe_module,
+    });
+
+    const exe_check = b.addExecutable(.{
+        .name = "GB_emulator",
+        .root_module = exe_module,
     });
 
     b.installArtifact(exe);
@@ -22,6 +29,9 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     run_cmd.step.dependOn(b.getInstallStep());
+
+    const check = b.step("check", "Check if foo compiles");
+    check.dependOn(&exe_check.step);
 
     if (b.args) |args| {
         run_cmd.addArgs(args);
