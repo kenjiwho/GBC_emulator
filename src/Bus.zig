@@ -1,5 +1,6 @@
-//! This module defines the Memory-Mapped I/O (MMIO) structure for a Game Boy Color
-const MMIO = @This();
+//! This module defines the Bus structure that implements Memory-Mapped I/O
+//! (MMIO) for a Game Boy Color
+const Bus = @This();
 
 ROM_0: [0x4000]u8 = @splat(0), // 16KiB ROM Bank 00: 0000-3FFF
 ROM_S: [0x4000]u8 = @splat(0), // 16KiB Switchable ROM Bank 01-NN: 4000-7FFF
@@ -14,11 +15,11 @@ IOPorts: [0x80]u8 = @splat(0), // I/O Registers: FF00-FF7F
 HRAM: [0x7F]u8 = @splat(0), // High RAM: FF80-FFFE
 IE: u8 = 0, // Interrupt Enable Register: FFFF
 
-pub fn init() MMIO {
-    return MMIO{};
+pub fn init() Bus {
+    return Bus{};
 }
 
-pub fn read(self: *const MMIO, address: u16) u8 {
+pub fn read(self: *const Bus, address: u16) u8 {
     return switch (address) {
         0x0000...0x3FFF => self.ROM_0[address],
         0x4000...0x7FFF => self.ROM_S[address - 0x4000],
@@ -36,7 +37,7 @@ pub fn read(self: *const MMIO, address: u16) u8 {
     };
 }
 
-pub fn write(self: *MMIO, address: u16, value: u8) void {
+pub fn write(self: *Bus, address: u16, value: u8) void {
     switch (address) {
         0x0000...0x3FFF => self.ROM_0[address] = value,
         0x4000...0x7FFF => self.ROM_S[address - 0x4000] = value,
