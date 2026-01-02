@@ -29,8 +29,16 @@ pub fn init(mmio: *MMIO) CPU {
 }
 
 pub fn execute(self: *CPU) !void {
+    // handle IME scheduling
+    const next_IME = self.IME_scheduled;
+
     self.opcode = self.fetch();
     try self.dispatch_ptr_tbl[(self.opcode >> 6)](self);
+
+    if (next_IME) {
+        self.IME = true;
+        self.IME_scheduled = false;
+    }
 }
 
 // --------------------------------- opcode dispatchers --------------------
@@ -2495,6 +2503,11 @@ test "EI" {
     try std.testing.expectEqual(true, cpu.IME_scheduled); // Interrupts scheduled to be enabled
     try std.testing.expectEqual(false, cpu.IME); // But not yet enabled
     try std.testing.expectEqual(1, cpu.regs.PC);
+
+    try cpu.execute(); // Next instruction
+    try std.testing.expectEqual(false, cpu.IME_scheduled); // Interrupts no longer scheduled
+    try std.testing.expectEqual(true, cpu.IME); // IME set
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "DI" {
