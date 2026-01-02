@@ -28,5 +28,4 @@ pub fn step(self: *GB) void {
         std.debug.print("CRASH: Attempted to execute invalid opcode: ${X} at PC: ${X}\n", .{ opcode, self.cpu.regs.PC });
         std.process.exit(1);
     };
-    self.cpu.regs.PC +%= 1;
 }

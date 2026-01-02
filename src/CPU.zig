@@ -6,8 +6,9 @@ const Registers = @import("Registers.zig");
 const MMIO = @import("MMIO.zig");
 
 // opcode function type
-const DispatchFn = *const fn (self: *CPU, opcode: u8) CpuError!void;
+const DispatchFn = *const fn (self: *CPU) CpuError!void;
 
+opcode: u8 = 0, // current opcode
 regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
 mmio: *MMIO, // reference to the mmio struct so instructions can read/write
 IME: bool = false, // Interrupt Master Enable flag
@@ -28,13 +29,13 @@ pub fn init(mmio: *MMIO) CPU {
 }
 
 pub fn execute(self: *CPU) !void {
-    const opcode = self.getOpcode();
-    try self.dispatch_ptr_tbl[(opcode >> 6)](self, opcode);
+    self.opcode = self.fetch();
+    try self.dispatch_ptr_tbl[(self.opcode >> 6)](self);
 }
 
 // --------------------------------- opcode dispatchers --------------------
-fn dispatch0(self: *CPU, opcode: u8) CpuError!void {
-    switch (opcode) { // full opcode
+fn dispatch0(self: *CPU) CpuError!void {
+    switch (self.opcode) { // full opcode
         0x00 => self.NOP(),
         0x08 => self.LD_imm16_SP(),
         0x18 => self.JR_imm8(),
@@ -49,7 +50,7 @@ fn dispatch0(self: *CPU, opcode: u8) CpuError!void {
         0x3F => self.CCF(),
         0x20, 0x28, 0x30, 0x38 => self.JR_cond_imm8(),
         else => {
-            switch (opcode & 0xF) { // lower 4 bits
+            switch (self.opcode & 0xF) { // lower 4 bits
                 0x1 => self.LD_r16_imm16(),
                 0x2 => self.LD_r16mem_A(),
                 0x3 => self.INC_r16(),
@@ -64,14 +65,14 @@ fn dispatch0(self: *CPU, opcode: u8) CpuError!void {
         },
     }
 }
-fn dispatch1(self: *CPU, opcode: u8) CpuError!void {
-    switch (opcode) { // full opcode
+fn dispatch1(self: *CPU) CpuError!void {
+    switch (self.opcode) { // full opcode
         0x76 => self.HALT(),
         else => self.LD_r8_r8(),
     }
 }
-fn dispatch2(self: *CPU, opcode: u8) CpuError!void {
-    switch (opcode >> 3) { // upper 5 bits
+fn dispatch2(self: *CPU) CpuError!void {
+    switch (self.opcode >> 3) { // upper 5 bits
         0b10000 => self.ADD_A_r8(),
         0b10001 => self.ADC_A_r8(),
         0b10010 => self.SUB_A_r8(),
@@ -83,8 +84,8 @@ fn dispatch2(self: *CPU, opcode: u8) CpuError!void {
         else => unreachable,
     }
 }
-fn dispatch3(self: *CPU, opcode: u8) CpuError!void {
-    switch (opcode) { // full opcode
+fn dispatch3(self: *CPU) CpuError!void {
+    switch (self.opcode) { // full opcode
         0xC6 => self.ADD_A_imm8(),
         0xCE => self.ADC_A_imm8(),
         0xD6 => self.SUB_A_imm8(),
@@ -113,7 +114,7 @@ fn dispatch3(self: *CPU, opcode: u8) CpuError!void {
         // invalid opcodes
         0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD => return CPU.CpuError.InvalidOpcode,
         else => {
-            switch (opcode & 0b111) { // lower 3 bits
+            switch (self.opcode & 0b111) { // lower 3 bits
                 0b000 => self.RET_cond(),
                 0b001 => self.POP_r16stk(),
                 0b010 => self.JP_cond_imm16(),
@@ -127,9 +128,11 @@ fn dispatch3(self: *CPU, opcode: u8) CpuError!void {
 }
 
 // --------------------------------- helper functions ----------------------
-/// Fetches the opcode at the current PC
-fn getOpcode(self: *const CPU) u8 {
-    return self.mmio.read(self.regs.PC);
+/// Fetches the opcode at the current PC and increments PC
+fn fetch(self: *CPU) u8 {
+    const opcode = self.mmio.read(self.regs.PC);
+    self.regs.PC +%= 1;
+    return opcode;
 }
 
 /// Gets flag from flags register
@@ -249,14 +252,14 @@ fn setR16stk(self: *CPU, register: u2, value: u16) void {
 }
 
 /// Fetches a 8-bit immediate value from the instruction stream
-fn getImm8(self: *const CPU, T: type) T {
-    return @bitCast(self.mmio.read(self.regs.PC + 1));
+fn getImm8(self: *CPU, T: type) T {
+    return @bitCast(self.fetch());
 }
 
 /// Fetches a 16-bit immediate value from the instruction stream
-fn getImm16(self: *const CPU) u16 {
-    const high = self.mmio.read(self.regs.PC + 1);
-    const low = self.mmio.read(self.regs.PC + 2);
+fn getImm16(self: *CPU) u16 {
+    const high = self.fetch();
+    const low = self.fetch();
     return (@as(u16, high) << 8) | low;
 }
 
@@ -293,11 +296,10 @@ fn NOP(self: *const CPU) void {
 /// Cycles: 3
 /// Bytes: 3
 fn LD_r16_imm16(self: *CPU) void {
-    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const imm16 = self.getImm16();
 
     self.setR16(r16, imm16);
-    self.regs.PC +%= 2;
 }
 
 /// 00[r16mem]0010: LD [r16mem], A: Store value of register A into memory pointed to by r16mem
@@ -306,7 +308,7 @@ fn LD_r16_imm16(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_r16mem_A(self: *CPU) void {
-    const r16mem: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16mem: u2 = @intCast((self.opcode >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
     self.mmio.write(addr, self.regs.A);
@@ -318,7 +320,7 @@ fn LD_r16mem_A(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_A_r16mem(self: *CPU) void {
-    const r16mem: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16mem: u2 = @intCast((self.opcode >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
     self.regs.A = self.mmio.read(addr);
@@ -333,7 +335,6 @@ fn LD_imm16_SP(self: *CPU) void {
     const imm16 = self.getImm16();
     self.mmio.write(imm16, @intCast(self.regs.SP & 0xFF));
     self.mmio.write(imm16 + 1, @intCast(self.regs.SP >> 8));
-    self.regs.PC +%= 2;
 }
 
 /// 00[r16]0011: INC r16: Increment the value in register r16 by 1
@@ -341,7 +342,7 @@ fn LD_imm16_SP(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn INC_r16(self: *CPU) void {
-    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const new_val = self.getR16(r16) +% 1;
 
     self.setR16(r16, new_val);
@@ -352,7 +353,7 @@ fn INC_r16(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn DEC_r16(self: *CPU) void {
-    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const new_val = self.getR16(r16) -% 1;
 
     self.setR16(r16, new_val);
@@ -367,7 +368,7 @@ fn DEC_r16(self: *CPU) void {
 ///     H=Set if overflow from bit 11
 ///     C=Set if overflow from bit 15
 fn ADD_HL_r16(self: *CPU) void {
-    const r16: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const val = self.getR16(r16);
 
     const hl = self.regs.getHL();
@@ -388,7 +389,7 @@ fn ADD_HL_r16(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 fn INC_r8(self: *CPU) void {
-    const r8: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
+    const r8: u3 = @intCast((self.opcode >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val +% 1;
 
@@ -407,7 +408,7 @@ fn INC_r8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 fn DEC_r8(self: *CPU) void {
-    const r8: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
+    const r8: u3 = @intCast((self.opcode >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val -% 1;
 
@@ -422,11 +423,10 @@ fn DEC_r8(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_imm8(self: *CPU) void {
-    const r8: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
+    const r8: u3 = @intCast((self.opcode >> 3) & 0b111);
     const imm8 = self.getImm8(u8);
 
     self.setR8(r8, imm8);
-    self.regs.PC +%= 1;
 }
 
 /// 00000111: RLCA: Rotate register A left
@@ -607,7 +607,6 @@ fn CCF(self: *CPU) void {
 fn JR_imm8(self: *CPU) void {
     const offset = self.getImm8(i8);
 
-    self.regs.PC +%= 1; // move past [imm8]
     // cast pc and offset to i32 to perform signed addition
     const pc_i32: i32 = @intCast(self.regs.PC);
     const offset_i32: i32 = @intCast(offset);
@@ -623,7 +622,7 @@ fn JR_imm8(self: *CPU) void {
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
 fn JR_cond_imm8(self: *CPU) void {
-    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
+    const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
     if (self.checkCondition(cond)) {
         self.JR_imm8();
     } else {
@@ -651,8 +650,8 @@ fn STOP(self: *const CPU) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_r8(self: *CPU) void {
-    const src: u3 = @intCast(self.getOpcode() & 0b111);
-    const dest: u3 = @intCast((self.getOpcode() >> 3) & 0b111);
+    const src: u3 = @intCast(self.opcode & 0b111);
+    const dest: u3 = @intCast((self.opcode >> 3) & 0b111);
 
     // if both src and dest are [HL], this is the HALT instruction
     if (src == 6 and dest == 6) {
@@ -700,7 +699,7 @@ fn HALT(self: *const CPU) void {
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
 fn ADD_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const old_a = self.regs.A;
 
@@ -721,7 +720,7 @@ fn ADD_A_r8(self: *CPU) void {
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
 fn ADC_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const carry = @intFromBool(self.getFlag(.C));
     const old_a = self.regs.A;
@@ -745,7 +744,7 @@ fn ADC_A_r8(self: *CPU) void {
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
 fn SUB_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const old_a = self.regs.A;
 
@@ -767,7 +766,7 @@ fn SUB_A_r8(self: *CPU) void {
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (r8 + C) > A)
 fn SBC_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const carry = @intFromBool(self.getFlag(.C));
     const old_a = self.regs.A;
@@ -792,7 +791,7 @@ fn SBC_A_r8(self: *CPU) void {
 ///     H=1
 ///     C=0
 fn AND_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
 
     self.regs.A = self.regs.A & value;
@@ -812,7 +811,7 @@ fn AND_A_r8(self: *CPU) void {
 ///     H=0
 ///     C=0
 fn XOR_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
 
     self.regs.A = self.regs.A ^ value;
@@ -832,7 +831,7 @@ fn XOR_A_r8(self: *CPU) void {
 ///     H=0
 ///     C=0
 fn OR_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
 
     self.regs.A = self.regs.A | value;
@@ -854,7 +853,7 @@ fn OR_A_r8(self: *CPU) void {
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
 fn CP_A_r8(self: *CPU) void {
-    const r8: u3 = @intCast(self.getOpcode() & 0b111);
+    const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const old_a = self.regs.A;
 
@@ -886,7 +885,6 @@ fn ADD_A_imm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, ((old_a & 0x0F) + (imm8 & 0x0F)) > 0x0F);
     self.setFlag(.C, c == 1);
-    self.regs.PC +%= 1;
 }
 
 /// 11001110[imm8]: ADC A, imm8: Add value imm8 plus the carry flag to
@@ -911,7 +909,6 @@ fn ADC_A_imm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, ((old_a & 0x0F) + (imm8 & 0x0F) + carry) > 0x0F);
     self.setFlag(.C, sum > 0xFF);
-    self.regs.PC +%= 1;
 }
 
 /// 11010110[imm8]: SUB A, imm8: Subtract value imm8 from register A
@@ -932,7 +929,6 @@ fn SUB_A_imm8(self: *CPU) void {
     self.setFlag(.N, true);
     self.setFlag(.H, (old_a & 0x0F) < (imm8 & 0x0F));
     self.setFlag(.C, c == 1);
-    self.regs.PC +%= 1;
 }
 
 /// 11011110[imm8]: SBC A, imm8: Subtract value imm8 and the carry flag from
@@ -958,7 +954,6 @@ fn SBC_A_imm8(self: *CPU) void {
     self.setFlag(.N, true);
     self.setFlag(.H, half_check < 0);
     self.setFlag(.C, sum < 0);
-    self.regs.PC +%= 1;
 }
 
 /// 11100110[imm8]: AND A, imm8: A = A & imm8 (bitwise AND)
@@ -978,7 +973,6 @@ fn AND_A_imm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, true);
     self.setFlag(.C, false);
-    self.regs.PC +%= 1;
 }
 
 /// 11101110[imm8]: XOR A, imm8: A = A ^ imm8 (bitwise XOR)
@@ -998,7 +992,6 @@ fn XOR_A_imm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, false);
-    self.regs.PC +%= 1;
 }
 
 /// 11110110[imm8]: OR A, imm8: A = A | imm8 (bitwise OR)
@@ -1017,7 +1010,6 @@ fn OR_A_imm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, false);
-    self.regs.PC +%= 1;
 }
 
 /// 11111110[imm8]: CP A, imm8: ComPare value in register A with value imm8.
@@ -1039,7 +1031,6 @@ fn CP_A_imm8(self: *CPU) void {
     self.setFlag(.N, true);
     self.setFlag(.H, (old_a & 0x0F) < (imm8 & 0x0F));
     self.setFlag(.C, c == 1);
-    self.regs.PC +%= 1;
 }
 
 /// 11001001: RET: Return from subroutine. This is basically a POP PC.
@@ -1047,7 +1038,7 @@ fn CP_A_imm8(self: *CPU) void {
 /// Cycles: 4
 /// Bytes: 1
 fn RET(self: *CPU) void {
-    self.regs.PC = self.pop() - 1; // -1 to offset the +1 after instruction fetch
+    self.regs.PC = self.pop();
 }
 
 /// 110[cond]000: RET cond: Return from subroutine if condition cond is met.
@@ -1055,7 +1046,7 @@ fn RET(self: *CPU) void {
 /// Cycles: 5 taken / 2 untaken
 /// Bytes: 1
 fn RET_cond(self: *CPU) void {
-    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
+    const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
 
     if (self.checkCondition(cond)) {
         self.RET();
@@ -1080,7 +1071,7 @@ fn RETI(self: CPU) void {
 fn JP_imm16(self: *CPU) void {
     const imm16 = self.getImm16();
 
-    self.regs.PC = imm16 - 1; // -1 to offset the +1 after instruction fetch
+    self.regs.PC = imm16;
 }
 
 /// 110[cond]010[imm16]: JP cond, imm16: Jump to address imm16 if condition
@@ -1089,7 +1080,7 @@ fn JP_imm16(self: *CPU) void {
 /// Cycles: 4 taken / 3 untaken
 /// Bytes: 3
 fn JP_cond_imm16(self: *CPU) void {
-    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
+    const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
 
     if (self.checkCondition(cond)) {
         self.JP_imm16();
@@ -1103,7 +1094,7 @@ fn JP_cond_imm16(self: *CPU) void {
 /// Cycles: 1
 /// Bytes: 1
 fn JP_HL(self: *CPU) void {
-    self.regs.PC = self.regs.getHL() - 1; // -1 to offset the +1 after instruction fetch
+    self.regs.PC = self.regs.getHL();
 }
 
 /// 11001101[imm16]: CALL imm16: Call address imm16. This pushes the address
@@ -1113,7 +1104,7 @@ fn JP_HL(self: *CPU) void {
 /// Cycles: 6
 /// Bytes: 3
 fn CALL_imm16(self: *CPU) void {
-    self.push(self.regs.PC + 3);
+    self.push(self.regs.PC + 2);
     self.JP_imm16();
 }
 
@@ -1122,7 +1113,7 @@ fn CALL_imm16(self: *CPU) void {
 /// Cycles: 6 taken / 3 untaken
 /// Bytes: 3
 fn CALL_cond_imm16(self: *CPU) void {
-    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
+    const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
 
     if (self.checkCondition(cond)) {
         self.CALL_imm16();
@@ -1136,10 +1127,10 @@ fn CALL_cond_imm16(self: *CPU) void {
 /// Cycles: 4
 /// Bytes: 1
 fn RST_tgt3(self: *CPU) void {
-    const tgt3 = (self.getOpcode() >> 3) & 0b111;
+    const tgt3 = (self.opcode >> 3) & 0b111;
 
-    self.push(self.regs.PC + 1);
-    self.regs.PC = tgt3 * 8 - 1; // -1 to offset the +1 after instruction fetch
+    self.push(self.regs.PC);
+    self.regs.PC = tgt3 * 8;
 }
 
 /// 11[r16stk]0001: POP r16stk: Pop register r16stk off the stack
@@ -1148,7 +1139,7 @@ fn RST_tgt3(self: *CPU) void {
 /// Bytes: 1
 fn POP_r16stk(self: *CPU) void {
     const value = self.pop();
-    const r16stk: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16stk: u2 = @intCast((self.opcode >> 4) & 0b11);
 
     self.setR16stk(r16stk, value);
 }
@@ -1158,7 +1149,7 @@ fn POP_r16stk(self: *CPU) void {
 /// Cycles: 4
 /// Bytes: 1
 fn PUSH_r16stk(self: *CPU) void {
-    const r16stk: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
+    const r16stk: u2 = @intCast((self.opcode >> 4) & 0b11);
     const value = self.getR16stk(r16stk);
 
     self.push(value);
@@ -1193,7 +1184,6 @@ fn LDH_imm8_A(self: *CPU) void {
     const address = @as(u16, 0xFF00) + imm8;
 
     self.mmio.write(address, self.regs.A);
-    self.regs.PC +%= 1;
 }
 
 /// 11101010[imm16]: LD [imm16], A: Copy the value of register A into the byte
@@ -1205,7 +1195,6 @@ fn LD_imm16_A(self: *CPU) void {
     const address = self.getImm16();
 
     self.mmio.write(address, self.regs.A);
-    self.regs.PC +%= 2;
 }
 
 /// 11110010: LDH A, [c]: Copy the byte at address $FF00 + C into register A
@@ -1228,7 +1217,6 @@ fn LDH_A_imm8(self: *CPU) void {
     const address = @as(u16, 0xFF00) + self.getImm8(u8);
 
     self.regs.A = self.mmio.read(address);
-    self.regs.PC +%= 1;
 }
 
 /// 11111010[imm16]: LD A, [imm16]: Load value at address imm16 into register A
@@ -1239,7 +1227,6 @@ fn LD_A_imm16(self: *CPU) void {
     const address = self.getImm16();
 
     self.regs.A = self.mmio.read(address);
-    self.regs.PC +%= 2;
 }
 
 /// 11101000[imm8]: ADD SP, imm8: Add signed value imm8 to stack pointer SP
@@ -1268,7 +1255,6 @@ fn ADD_SP_imm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, h_check > 0xF);
     self.setFlag(.C, c_check > 0xFF);
-    self.regs.PC +%= 1;
 }
 
 /// 11111000[imm8]: LD HL, SP+imm8: Add signed value imm8 to stack pointer SP
@@ -1298,7 +1284,6 @@ fn LD_HL_SPimm8(self: *CPU) void {
     self.setFlag(.N, false);
     self.setFlag(.H, h_check > 0xF);
     self.setFlag(.C, c_check > 0xFF);
-    self.regs.PC +%= 1;
 }
 
 /// 11111001: LD A, HL: Copy register HL into stack pointer SP
@@ -1490,7 +1475,6 @@ test "NOP" {
     var mmio = MMIO.init();
     var cpu = CPU.init(&mmio);
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
@@ -1501,7 +1485,6 @@ test "LD_r16_imm16" {
     mmio.write(1, 0x34); // Low byte
     mmio.write(2, 0x12); // High byte
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x34, cpu.regs.B); // Low byte
     try std.testing.expectEqual(0x12, cpu.regs.C); // High byte
     try std.testing.expectEqual(3, cpu.regs.PC);
@@ -1510,7 +1493,6 @@ test "LD_r16_imm16" {
     mmio.write(4, 0x78); // Low byte
     mmio.write(5, 0x56); // High byte
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x7856, cpu.regs.SP);
     try std.testing.expectEqual(6, cpu.regs.PC);
 }
@@ -1523,7 +1505,6 @@ test "LD_r16mem_A" {
     cpu.regs.B = 0x34; // B register (high byte of BC)
     cpu.regs.C = 0x12; // C register (low byte of BC)
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xAB, mmio.read(0x3412));
     try std.testing.expectEqual(1, cpu.regs.PC);
 
@@ -1531,7 +1512,6 @@ test "LD_r16mem_A" {
     cpu.regs.H = 0x56; // H register (high byte of HL)
     cpu.regs.L = 0xFF; // L register (low byte of HL)
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xAB, mmio.read(0x56FF));
     try std.testing.expectEqual(0x57, cpu.regs.H);
     try std.testing.expectEqual(0x00, cpu.regs.L);
@@ -1541,7 +1521,6 @@ test "LD_r16mem_A" {
     cpu.regs.H = 0x4A; // H register (high byte of HL)
     cpu.regs.L = 0xBC; // L register (low byte of HL)
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xAB, mmio.read(0x4ABC));
     try std.testing.expectEqual(0x4A, cpu.regs.H);
     try std.testing.expectEqual(0xBB, cpu.regs.L);
@@ -1556,7 +1535,6 @@ test "LD_A_r16mem" {
     cpu.regs.B = 0x34; // B register (high byte of BC)
     cpu.regs.C = 0x12; // C register (low byte of BC)
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xCD, cpu.regs.A); // A register
     try std.testing.expectEqual(1, cpu.regs.PC);
 }
@@ -1569,7 +1547,6 @@ test "LD_imm16_SP" {
     mmio.write(1, 0x10); // Low byte of imm16
     mmio.write(2, 0x80); // High byte of imm16
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xBC, mmio.read(0x1080)); // Low byte of SP
     try std.testing.expectEqual(0x9A, mmio.read(0x1081)); // High byte of SP
     try std.testing.expectEqual(3, cpu.regs.PC);
@@ -1582,7 +1559,6 @@ test "INC_r16" {
     cpu.regs.C = 0xFF; // C register
     mmio.write(0, 0b00000011); // Opcode for INC BC
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x00, cpu.regs.B); // B register
     try std.testing.expectEqual(0x00, cpu.regs.C); // C register
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1590,7 +1566,6 @@ test "INC_r16" {
     cpu.regs.SP = 0x1234; // SP
     mmio.write(1, 0b00110011); // Opcode for INC SP
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1235, cpu.regs.SP); // SP
     try std.testing.expectEqual(2, cpu.regs.PC);
 }
@@ -1602,7 +1577,6 @@ test "DEC_r16" {
     cpu.regs.C = 0x00; // C register
     mmio.write(0, 0b00001011); // Opcode for DEC BC
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFF, cpu.regs.B); // B register
     try std.testing.expectEqual(0xFF, cpu.regs.C); // C register
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1610,7 +1584,6 @@ test "DEC_r16" {
     cpu.regs.SP = 0x0000; // SP
     mmio.write(1, 0b00111011); // Opcode for DEC SP
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFFFF, cpu.regs.SP); // SP
     try std.testing.expectEqual(2, cpu.regs.PC);
 }
@@ -1624,7 +1597,6 @@ test "ADD_HL_r16" {
     cpu.regs.C = 0x10; // C register
     mmio.write(0, 0b00001001); // Opcode for ADD HL, BC
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x20, cpu.regs.H);
     try std.testing.expectEqual(0x44, cpu.regs.L);
     try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
@@ -1637,7 +1609,6 @@ test "ADD_HL_r16" {
     cpu.regs.E = 0x01; // E register
     mmio.write(1, 0b00011001); // Opcode for ADD HL, DE
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x00, cpu.regs.H);
     try std.testing.expectEqual(0x00, cpu.regs.L);
     try std.testing.expectEqual(0b10110000, cpu.regs.F); // Check Flags
@@ -1650,7 +1621,6 @@ test "INC_r8" {
     cpu.regs.A = 0xFF; // A register
     mmio.write(0, 0b00111100); // Opcode for INC A
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x00, cpu.regs.A); // A register
     try std.testing.expectEqual(0b10100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1662,7 +1632,6 @@ test "DEC_r8" {
     cpu.regs.A = 0x00; // A register
     mmio.write(0, 0b00111101); // Opcode for DEC A
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFF, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1674,7 +1643,6 @@ test "LD_r8_imm8" {
     mmio.write(0, 0b00000110); // Opcode for LD B, imm8
     mmio.write(1, 0x7A); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x7A, cpu.regs.B); // B register
     try std.testing.expectEqual(2, cpu.regs.PC);
 }
@@ -1685,7 +1653,6 @@ test "RLCA" {
     cpu.regs.A = 0b10000001; // A register
     mmio.write(0, 0b00000111); // Opcode for RLCA
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b00000011, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1697,7 +1664,6 @@ test "RRCA" {
     cpu.regs.A = 0b00000011; // A register
     mmio.write(0, 0b00001111); // Opcode for RRCA
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b10000001, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1710,7 +1676,6 @@ test "RLA" {
     cpu.regs.F = 0b00010000; // Set Carry flag
     mmio.write(0, 0b00010111); // Opcode for RLA
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b00000011, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1723,7 +1688,6 @@ test "RRA" {
     cpu.regs.F = 0b00010000; // Set Carry flag
     mmio.write(0, 0b00011111); // Opcode for RRA
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b10000001, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1736,7 +1700,6 @@ test "DAA" {
     cpu.regs.F = 0b01110000; // Clear all flags
     mmio.write(0, 0b00100111); // Opcode for DAA
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x98 - 0x66, cpu.regs.A);
     try std.testing.expectEqual(0b01010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1745,7 +1708,6 @@ test "DAA" {
     cpu.regs.F = 0b00110000; // Set N flag
     mmio.write(1, 0b00100111); // Opcode for DAA
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x12 + 0x66, cpu.regs.A);
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -1757,7 +1719,6 @@ test "CPL" {
     cpu.regs.A = 0b10101010; // A register
     mmio.write(0, 0b00101111); // Opcode for CPL
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b01010101, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1769,7 +1730,6 @@ test "SCF" {
     cpu.regs.F = 0b00000000; // Clear all flags
     mmio.write(0, 0b00110111); // Opcode for SCF
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
 }
@@ -1780,13 +1740,11 @@ test "CCF" {
     cpu.regs.F = 0b00010000; // Set Carry flag
     mmio.write(0, 0b00111111); // Opcode for CCF
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
 
     mmio.write(1, 0b00111111); // Opcode for CCF
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
 }
@@ -1797,13 +1755,11 @@ test "JR_imm8" {
     mmio.write(0, 0b00011000); // Opcode for JR imm8
     mmio.write(1, 0x05); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x07, cpu.regs.PC); // PC should be 0 + 2 + 5
 
     mmio.write(8, @bitCast(@as(i8, -2))); // imm8 value to jump back
     mmio.write(7, 0b00011000); // Opcode for JR imm8
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x07, cpu.regs.PC); // PC should be 7 + 2 - 2
 }
 
@@ -1814,14 +1770,12 @@ test "JR_cond_imm8" {
     mmio.write(1, 0x04); // imm8 value
     cpu.regs.F = 0b00000000; // Z flag not set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x06, cpu.regs.PC); // PC should be 0 + 2 + 4
 
     mmio.write(6, 0b00100000); // Opcode for JR NZ, imm8
     mmio.write(7, 0x04); // imm8 value
     cpu.regs.F = 0b10000000; // Z flag set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x08, cpu.regs.PC); // PC should be 6 + 2
 }
 
@@ -1830,8 +1784,7 @@ test "STOP" {
     // var cpu = CPU.init(&mmio);
     // mmio.write(0, 0b01110110); // Opcode for HALT
     // try cpu.execute();
-    // cpu.regs.PC +%= 1;
-    // try std.testing.expectEqual(true, cpu.halted);
+    // // try std.testing.expectEqual(true, cpu.halted);
     // try std.testing.expectEqual(1, cpu.registers.PC);
 }
 
@@ -1841,14 +1794,12 @@ test "LD_r8_r8" {
     cpu.regs.B = 0x56; // B register
     mmio.write(0, 0b01000000); // Opcode for LD B, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x56, cpu.regs.B); // B register
     try std.testing.expectEqual(1, cpu.regs.PC);
 
     cpu.regs.C = 0x78; // C register
     mmio.write(1, 0b01000001); // Opcode for LD B, C
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x78, cpu.regs.B); // B register
     try std.testing.expectEqual(2, cpu.regs.PC);
 
@@ -1860,8 +1811,7 @@ test "HALT" {
     // var cpu = CPU.init(&mmio);
     // mmio.write(0, 0b01110110); // Opcode for HALT
     // try cpu.execute();
-    // cpu.regs.PC +%= 1;
-    // try std.testing.expectEqual(true, cpu.halted);
+    // // try std.testing.expectEqual(true, cpu.halted);
     // try std.testing.expectEqual(1, cpu.registers.PC);
 }
 
@@ -1872,14 +1822,12 @@ test "ADD_A_r8" {
     cpu.regs.B = 0x28;
     mmio.write(0, 0b10000000); // Opcode for ADD A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x3C, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
 
     mmio.write(1, 0b10000000); // Opcode for ADD A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x64, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -1893,7 +1841,6 @@ test "ADC_A_r8" {
     cpu.regs.F = 0b00010000; // Set Carry flag
     mmio.write(0, 0b10001000); // Opcode for ADC A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x3D, cpu.regs.A);
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1902,7 +1849,6 @@ test "ADC_A_r8" {
     cpu.regs.B = 0xC2;
     cpu.regs.F = 0b00110000; // Set Carry flag
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x00, cpu.regs.A);
     try std.testing.expectEqual(0b10110000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -1915,7 +1861,6 @@ test "SUB_A_r8" {
     cpu.regs.B = 0x20;
     mmio.write(0, 0b10010000); // Opcode for SUB A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x30, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1923,7 +1868,6 @@ test "SUB_A_r8" {
     mmio.write(1, 0b10010000); // Opcode for SUB A, B
     cpu.regs.B = 0x01;
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x2F, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -1936,7 +1880,6 @@ test "SBC_A_r8" {
     cpu.regs.B = 0x20;
     mmio.write(0, 0b10011000); // Opcode for SBC A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x30, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1945,7 +1888,6 @@ test "SBC_A_r8" {
     cpu.regs.B = 0x30;
     cpu.regs.F = 0b01110000; // Set Carry flag
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFF, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01110000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -1958,7 +1900,6 @@ test "AND_A_r8" {
     cpu.regs.B = 0b10101010;
     mmio.write(0, 0b10100000); // Opcode for AND A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b10001000, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1971,7 +1912,6 @@ test "XOR_A_r8" {
     cpu.regs.B = 0b10101010;
     mmio.write(0, 0b10101000); // Opcode for XOR A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b01100110, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1984,7 +1924,6 @@ test "OR_A_r8" {
     cpu.regs.B = 0b10101010;
     mmio.write(0, 0b10110000); // Opcode for OR A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b11101110, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -1997,7 +1936,6 @@ test "CP_A_r8" {
     cpu.regs.B = 0x20;
     mmio.write(0, 0b10111000); // Opcode for CP A, B
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
     try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -2005,7 +1943,6 @@ test "CP_A_r8" {
     mmio.write(1, 0b10111000); // Opcode for CP A, B
     cpu.regs.B = 0x60;
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
     try std.testing.expectEqual(0b01010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2018,7 +1955,6 @@ test "ADD_A_imm8" {
     mmio.write(0, 0b11000110); // Opcode for ADD A, imm8
     mmio.write(1, 0x22); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x32, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2026,7 +1962,6 @@ test "ADD_A_imm8" {
     mmio.write(2, 0b11000110); // Opcode for ADD A, imm8
     mmio.write(3, 0xD0); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x02, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(4, cpu.regs.PC);
@@ -2040,7 +1975,6 @@ test "ADC_A_imm8" {
     mmio.write(0, 0b11001110); // Opcode for ADC A, imm8
     mmio.write(1, 0x22); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x33, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2049,7 +1983,6 @@ test "ADC_A_imm8" {
     mmio.write(3, 0xD0); // imm8 value
     cpu.regs.F = 0b00110000; // Set Carry flag
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x04, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(4, cpu.regs.PC);
@@ -2062,7 +1995,6 @@ test "SUB_A_imm8" {
     mmio.write(0, 0b11010110); // Opcode for SUB A, imm8
     mmio.write(1, 0x20); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x30, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2070,7 +2002,6 @@ test "SUB_A_imm8" {
     mmio.write(2, 0b11010110); // Opcode for SUB A, imm8
     mmio.write(3, 0x31); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFF, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01110000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(4, cpu.regs.PC);
@@ -2083,7 +2014,6 @@ test "SBC_A_imm8" {
     mmio.write(0, 0b11011110); // Opcode for SBC A, imm8
     mmio.write(1, 0x20); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x30, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2092,7 +2022,6 @@ test "SBC_A_imm8" {
     mmio.write(3, 0x31); // imm8 value
     cpu.regs.F = 0b01110000; // Set Carry flag
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFE, cpu.regs.A); // A register
     try std.testing.expectEqual(0b01110000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(4, cpu.regs.PC);
@@ -2105,7 +2034,6 @@ test "AND_A_imm8" {
     mmio.write(0, 0b11100110); // Opcode for AND A, imm8
     mmio.write(1, 0b10101010); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b10001000, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2118,7 +2046,6 @@ test "XOR_A_imm8" {
     mmio.write(0, 0b11101110); // Opcode for XOR A, imm8
     mmio.write(1, 0b10101010); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b01100110, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2131,7 +2058,6 @@ test "OR_A_imm8" {
     mmio.write(0, 0b11110110); // Opcode for OR A, imm8
     mmio.write(1, 0b10101010); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0b11101110, cpu.regs.A); // A register
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2144,7 +2070,6 @@ test "CP_A_imm8" {
     mmio.write(0, 0b11111110); // Opcode for CP A, imm8
     mmio.write(1, 0x20); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
     try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2152,7 +2077,6 @@ test "CP_A_imm8" {
     mmio.write(2, 0b11111110); // Opcode for CP A, imm8
     mmio.write(3, 0x60); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
     try std.testing.expectEqual(0b01010000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(4, cpu.regs.PC);
@@ -2167,7 +2091,6 @@ test "RET" {
     mmio.write(0xDFFE, 0x34); // Low byte of return address
     mmio.write(0xDFFF, 0x12); // High byte of return address
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
     try std.testing.expectEqual(0xE000, cpu.regs.SP); // SP should be incremented by 2
 }
@@ -2182,7 +2105,6 @@ test "RET_cond" {
     mmio.write(0xFFFF, 0x12); // High byte of return address
     cpu.regs.F = 0b00000000; // Z flag not set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
     try std.testing.expectEqual(0x0000, cpu.regs.SP); // SP should be incremented by 2
 
@@ -2193,7 +2115,6 @@ test "RET_cond" {
     mmio.write(1, 0b11000000); // Opcode for RET NZ
     cpu.regs.F = 0b10000000; // Z flag set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1235, cpu.regs.PC); // PC should just increment
     try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should remain unchanged
 }
@@ -2219,7 +2140,6 @@ test "JP_imm16" {
     mmio.write(1, 0x34); // Low byte of address
     mmio.write(2, 0x12); // High byte of address
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
 }
 
@@ -2231,7 +2151,6 @@ test "JP_cond_imm16" {
     mmio.write(2, 0x12); // High byte of address
     cpu.regs.F = 0b00000000; // Z flag not set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
 
     mmio.write(3, 0b11000010); // Opcode for JP NZ, imm16
@@ -2239,7 +2158,6 @@ test "JP_cond_imm16" {
     mmio.write(5, 0x56); // High byte of address
     cpu.regs.F = 0b10000000; // Z flag set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x3413, cpu.regs.PC); // PC should just increment
 }
 
@@ -2250,7 +2168,6 @@ test "JP_HL" {
     cpu.regs.L = 0x34; // L register
     mmio.write(0, 0b11101001); // Opcode for JP HL
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to HL value
 }
 
@@ -2264,7 +2181,6 @@ test "CALL_imm16" {
     mmio.write(1, 0x12); // Low byte of address
     mmio.write(2, 0x34); // High byte of address
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to address
     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
     try std.testing.expectEqual(0x03, mmio.read(0xFFFC)); // Low byte of return address
@@ -2281,7 +2197,6 @@ test "CALL_cond_imm16" {
     mmio.write(2, 0x34); // High byte of address
     cpu.regs.F = 0b00000000; // Z flag not set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to address
     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
     try std.testing.expectEqual(0x03, mmio.read(0xFFFC)); // Low byte of return address
@@ -2294,7 +2209,6 @@ test "CALL_cond_imm16" {
     mmio.write(0x1236, 0x78); // High byte of address
     cpu.regs.F = 0b10000000; // Z flag set
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1237, cpu.regs.PC); // PC should just increment
     try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should remain unchanged
 }
@@ -2306,7 +2220,6 @@ test "RST_tgt3" {
     cpu.regs.SP = 0xFFFE;
     mmio.write(0, 0b11011111); // Opcode for RST $18
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x18, cpu.regs.PC); // PC should be set to target address
     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
     try std.testing.expectEqual(0x01, mmio.read(0xFFFC)); // Low byte of return address
@@ -2322,7 +2235,6 @@ test "POP_r16stk" {
     mmio.write(0xFFFD, 0x12); // High byte
     mmio.write(0, 0b11000001); // Opcode for POP BC
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.getR16(0)); // BC register
     try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should be incremented by 2
 }
@@ -2334,7 +2246,6 @@ test "PUSH_r16stk" {
     cpu.regs.SP = 0xFFFE;
     mmio.write(0, 0b11000101); // Opcode for PUSH BC
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
     try std.testing.expectEqual(0x12, mmio.read(0xFFFD)); // High byte
     try std.testing.expectEqual(0x34, mmio.read(0xFFFC)); // Low byte
@@ -2347,7 +2258,6 @@ test "LDH_C_A" {
     cpu.regs.A = 0x42; // A register
     mmio.write(0, 0b11100010); // Opcode for LDH (C), A
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x42, mmio.read(0xFF10)); // Check memory
     try std.testing.expectEqual(1, cpu.regs.PC);
 }
@@ -2359,7 +2269,6 @@ test "LDH_imm8_A" {
     mmio.write(0, 0b11100000); // Opcode for LD (imm8), A
     mmio.write(1, 0x20); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x37, mmio.read(0xFF20)); // Check memory
     try std.testing.expectEqual(2, cpu.regs.PC);
 }
@@ -2372,7 +2281,6 @@ test "LD_imm16_A" {
     mmio.write(1, 0xC0); // Low byte of address
     mmio.write(2, 0x00); // High byte of address
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x55, mmio.read(0xC000)); // Check memory
     try std.testing.expectEqual(3, cpu.regs.PC);
 }
@@ -2384,7 +2292,6 @@ test "LDH_A_C" {
     cpu.regs.C = 0x20; // C register
     mmio.write(0, 0b11110010); // Opcode for LDH A, (C)
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x7A, cpu.regs.A); // A register
     try std.testing.expectEqual(1, cpu.regs.PC);
 }
@@ -2397,7 +2304,6 @@ test "LDH_A_imm8" {
     mmio.write(0, 0b11110000); // Opcode for LDH A, (imm8)
     mmio.write(1, 0x30); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x8B, cpu.regs.A); // A register
     try std.testing.expectEqual(2, cpu.regs.PC);
 }
@@ -2411,7 +2317,6 @@ test "LD_A_imm16" {
     mmio.write(1, 0xC1); // Low byte of address
     mmio.write(2, 0x00); // High byte of address
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x9C, cpu.regs.A); // A register
     try std.testing.expectEqual(3, cpu.regs.PC);
 }
@@ -2423,7 +2328,6 @@ test "ADD_SP_imm8" {
     mmio.write(0, 0b11101000); // Opcode for ADD SP, imm8
     mmio.write(1, 0x08); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x0000, cpu.regs.SP); // SP should wrap around
     try std.testing.expectEqual(0b00110000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(2, cpu.regs.PC);
@@ -2432,7 +2336,6 @@ test "ADD_SP_imm8" {
     mmio.write(2, 0b11101000); // Opcode for ADD SP, imm8
     mmio.write(3, @bitCast(@as(i8, -5))); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFFFF, cpu.regs.SP); // SP should be 4 - 6 = FFFF (wrap around)
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
     try std.testing.expectEqual(4, cpu.regs.PC);
@@ -2445,7 +2348,6 @@ test "LD_HL_SPimm8" {
     mmio.write(0, 0b11111000); // Opcode for LD HL, SP+imm8
     mmio.write(1, 0x08); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0xFFF8, cpu.regs.SP); // SP should stay the same
     try std.testing.expectEqual(0x0000, cpu.regs.getHL()); // HL should be SP + 8 = 0x0000 (wrap around)
     try std.testing.expectEqual(0b00110000, cpu.regs.F); // Check Flags
@@ -2455,7 +2357,6 @@ test "LD_HL_SPimm8" {
     mmio.write(2, 0b11111000); // Opcode for LD HL, SP+imm8
     mmio.write(3, @bitCast(@as(i8, -5))); // imm8 value
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x0004, cpu.regs.SP); // SP should stay the same
     try std.testing.expectEqual(0xFFFF, cpu.regs.getHL()); // HL should be SP - 6 = FFFF (wrap around)
     try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
@@ -2469,7 +2370,6 @@ test "LD_SP_HL" {
     cpu.regs.L = 0x34; // L register
     mmio.write(0, 0b11111001); // Opcode for LD SP, HL
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(0x1234, cpu.regs.SP); // SP should be set to HL value
     try std.testing.expectEqual(1, cpu.regs.PC);
 }
@@ -2479,7 +2379,6 @@ test "EI" {
     var cpu = CPU.init(&mmio);
     mmio.write(0, 0b11111011); // Opcode for EI
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(true, cpu.IME_scheduled); // Interrupts scheduled to be enabled
     try std.testing.expectEqual(false, cpu.IME); // But not yet enabled
     try std.testing.expectEqual(1, cpu.regs.PC);
@@ -2491,7 +2390,6 @@ test "DI" {
     cpu.IME = true;
     mmio.write(0, 0b11110011); // Opcode for DI
     try cpu.execute();
-    cpu.regs.PC +%= 1;
     try std.testing.expectEqual(false, cpu.IME); // Interrupts should be disabled
     try std.testing.expectEqual(1, cpu.regs.PC);
 }

@@ -30,5 +30,5 @@ test "context" {
 
     gb.step();
 
-    try std.testing.expect(gb.cpu.regs.PC == 1);
+    try std.testing.expectEqual(1, gb.cpu.regs.PC);
 }
