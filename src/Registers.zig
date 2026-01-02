@@ -16,6 +16,17 @@ L: u8 = 0,
 SP: u16 = 0, // Stack Pointer
 PC: u16 = 0, // Program Counter
 
+pub const Flag = enum(u3) {
+    Z = 7, // Zero Flag
+    N = 6, // Subtract Flag
+    H = 5, // Half Carry Flag
+    C = 4, // Carry Flag
+};
+
+pub fn init() Registers {
+    return Registers{};
+}
+
 // access registers as 16-bit pairs
 pub fn getBC(self: *const Registers) u16 {
     return (@as(u16, self.B) << 8) | self.C;
@@ -51,47 +62,4 @@ pub fn getAF(self: *const Registers) u16 {
 pub fn setAF(self: *Registers, value: u16) void {
     self.A = @intCast(value >> 8);
     self.F = @intCast(value & 0xFF);
-}
-
-pub const Flag = enum(u3) {
-    Z = 7, // Zero Flag
-    N = 6, // Subtract Flag
-    H = 5, // Half Carry Flag
-    C = 4, // Carry Flag
-};
-
-pub const r8 = enum(u4) {
-    B,
-    C,
-    D,
-    E,
-    H,
-    L,
-    HL,
-    A,
-};
-
-pub const r16 = enum(u2) {
-    BC,
-    DE,
-    HL,
-    SP,
-};
-
-pub const r16stk = enum(u2) {
-    BC,
-    DE,
-    HL,
-    AF,
-};
-
-pub const r16mem = enum(u2) {
-    BC,
-    DE,
-    HLI,
-    HLD,
-};
-
-pub fn init() Registers {
-    return Registers{};
 }

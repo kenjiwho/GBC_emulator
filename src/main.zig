@@ -2,7 +2,12 @@ const std = @import("std");
 const GB = @import("GB.zig");
 
 pub fn main() !void {
-    var gb = GB.init();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var gb = try GB.init(allocator);
+    defer gb.deinit(allocator);
 
     std.debug.print("{d}\n", .{gb.cpu.regs.PC});
 
@@ -16,7 +21,13 @@ test {
 }
 
 test "context" {
-    var gb = GB.init();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var gb = try GB.init(allocator);
+    defer gb.deinit(allocator);
+
     gb.step();
 
     try std.testing.expect(gb.cpu.regs.PC == 1);
