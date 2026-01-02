@@ -1060,9 +1060,9 @@ fn RET_cond(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RETI(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RETI(self: *CPU) void {
+    self.RET();
+    self.IME = true;
 }
 
 /// 11000011[imm16]: JP imm16: Jump to address imm16 (copy n16 into PC).
@@ -1334,7 +1334,7 @@ fn CB_prefix(self: *CPU) void {
                 5 => self.SRA_r8(),
                 6 => self.SWAP_r8(),
                 7 => self.SRL_r8(),
-                else => @panic("unreachable"),
+                else => unreachable,
             }
         },
     }
@@ -2232,19 +2232,19 @@ test "RET_cond" {
     try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should remain unchanged
 }
 
-// test "RETI" {
-//     var mmio = MMIO.init();
-//     var cpu = CPU.init(&mmio);
-//     // Prepare stack
-//     cpu.regs.SP = 0xFFFE;
-//     mmio.write(0xFFFE, 0x34); // Low byte of return address
-//     mmio.write(0xFFFF, 0x12); // High byte of return address
-//     mmio.write(0, 0b11001011); // Opcode for RETI
-//     try cpu.execute();
-//     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
-//     try std.testing.expectEqual(0x0000, cpu.regs.SP); // SP should be incremented by 2
-//     try std.testing.expectEqual(true, cpu.interrupts_enabled); // Interrupts should be enabled
-// }
+test "RETI" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    // Prepare stack
+    cpu.regs.SP = 0xFFFC;
+    mmio.write(0xFFFC, 0x34); // Low byte of return address
+    mmio.write(0xFFFD, 0x12); // High byte of return address
+    mmio.write(0, 0b11011001); // Opcode for RETI
+    try cpu.execute();
+    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
+    try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should be incremented by 2
+    try std.testing.expectEqual(true, cpu.IME); // Interrupts should be enabled
+}
 
 test "JP_imm16" {
     var mmio = MMIO.init();
