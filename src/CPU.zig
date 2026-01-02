@@ -3,12 +3,13 @@ const CPU = @This();
 
 const std = @import("std");
 const Registers = @import("Registers.zig");
+const MMIO = @import("MMIO.zig");
 
 // opcode function type
 const DispatchFn = *const fn (self: *CPU, opcode: u8) void;
 
 regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
-RAM: []u8, // reference to the system RAM so instructions can read/write memory
+mmio: *MMIO, // reference to the mmio struct so instructions can read/write
 comptime dispatch_ptr_tbl: [4]DispatchFn = .{
     dispatch0,
     dispatch1,
@@ -16,8 +17,8 @@ comptime dispatch_ptr_tbl: [4]DispatchFn = .{
     dispatch3,
 },
 
-pub fn init(RAM: []u8) CPU {
-    return CPU{ .RAM = RAM };
+pub fn init(mmio: *MMIO) CPU {
+    return CPU{ .mmio = mmio };
 }
 
 pub fn execute(self: *CPU) void {
@@ -120,7 +121,7 @@ fn dispatch3(self: *CPU, opcode: u8) void {
 // --------------------------------- helper functions ----------------------
 /// Fetches the opcode at the current PC
 fn getOpcode(self: *const CPU) u8 {
-    return self.RAM[self.regs.PC];
+    return self.mmio.read(self.regs.PC);
 }
 
 /// Gets flag from flags register
@@ -162,7 +163,7 @@ fn getR8(self: *const CPU, register: u3) u8 {
         5 => self.regs.L,
         6 => { // read from memory pointed to by HL
             const addr = self.regs.getHL();
-            return self.RAM[addr];
+            return self.mmio.read(addr);
         },
         7 => self.regs.A,
     };
@@ -179,7 +180,7 @@ fn setR8(self: *CPU, register: u3, value: u8) void {
         5 => self.regs.L = value,
         6 => { // write to memory pointed to by HL
             const addr = self.regs.getHL();
-            self.RAM[addr] = value;
+            self.mmio.write(addr, value);
         },
         7 => self.regs.A = value,
     }
@@ -225,12 +226,30 @@ fn getR16mem(self: *CPU, register: u2) u16 {
 
 /// Fetches a 8-bit immediate value from the instruction stream
 fn getImm8(self: *const CPU, T: type) T {
-    return @bitCast(self.RAM[self.regs.PC + 1]);
+    return @bitCast(self.mmio.read(self.regs.PC + 1));
 }
 
 /// Fetches a 16-bit immediate value from the instruction stream
 fn getImm16(self: *const CPU) u16 {
-    return (@as(u16, self.RAM[self.regs.PC + 1]) << 8) | self.RAM[self.regs.PC + 2];
+    const high = self.mmio.read(self.regs.PC + 1);
+    const low = self.mmio.read(self.regs.PC + 2);
+    return (@as(u16, high) << 8) | low;
+}
+
+/// pop a 16-bit value from the stack
+fn pop(self: *CPU) u16 {
+    const low = self.mmio.read(self.regs.SP);
+    const high = self.mmio.read(self.regs.SP +% 1);
+    self.regs.SP +%= 2;
+
+    return (@as(u16, high) << 8) | low;
+}
+
+/// push a 16-bit value onto the stack
+fn push(self: *CPU, value: u16) void {
+    self.regs.SP -%= 2;
+    self.mmio.write(self.regs.SP +% 1, @intCast(value >> 8));
+    self.mmio.write(self.regs.SP, @intCast(value & 0xFF));
 }
 
 // --------------------------------- end helper functions ------------------
@@ -254,7 +273,7 @@ fn LD_r16_imm16(self: *CPU) void {
     const imm16 = self.getImm16();
 
     self.setR16(r16, imm16);
-    self.regs.PC += 2;
+    self.regs.PC +%= 2;
 }
 
 /// 00[r16mem]0010: LD [r16mem], A: Store value of register A into memory pointed to by r16mem
@@ -266,7 +285,7 @@ fn LD_r16mem_A(self: *CPU) void {
     const r16mem: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
-    self.RAM[addr] = self.regs.A;
+    self.mmio.write(addr, self.regs.A);
 }
 
 /// 00[r16mem]1010: LD A, [r16mem]: Load value of memory pointed to by r16mem into register A
@@ -278,7 +297,7 @@ fn LD_A_r16mem(self: *CPU) void {
     const r16mem: u2 = @intCast((self.getOpcode() >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
-    self.regs.A = self.RAM[addr];
+    self.regs.A = self.mmio.read(addr);
 }
 
 /// 00001000[imm16]: LD [imm16], SP: Copy SP & $FF (lower byte of SP) at address imm16 and
@@ -288,9 +307,9 @@ fn LD_A_r16mem(self: *CPU) void {
 /// Bytes: 3
 fn LD_imm16_SP(self: *CPU) void {
     const imm16 = self.getImm16();
-    self.RAM[imm16] = @intCast(self.regs.SP & 0xFF);
-    self.RAM[imm16 + 1] = @intCast(self.regs.SP >> 8);
-    self.regs.PC += 2;
+    self.mmio.write(imm16, @intCast(self.regs.SP & 0xFF));
+    self.mmio.write(imm16 + 1, @intCast(self.regs.SP >> 8));
+    self.regs.PC +%= 2;
 }
 
 /// 00[r16]0011: INC r16: Increment the value in register r16 by 1
@@ -383,7 +402,7 @@ fn LD_r8_imm8(self: *CPU) void {
     const imm8 = self.getImm8(u8);
 
     self.setR8(r8, imm8);
-    self.regs.PC += 1;
+    self.regs.PC +%= 1;
 }
 
 /// 00000111: RLCA: Rotate register A left
@@ -564,11 +583,11 @@ fn CCF(self: *CPU) void {
 fn JR_imm8(self: *CPU) void {
     const imm8 = self.getImm8(i8);
 
-    self.regs.PC += 1; // move past [imm8]
+    self.regs.PC +%= 1; // move past [imm8]
     // cast pc and offset to i32 to perform signed addition
     const pc_i32: i32 = @intCast(self.regs.PC);
     const offset_i32: i32 = @intCast(imm8);
-    self.regs.PC = @intCast(pc_i32 + offset_i32);
+    self.regs.PC = @intCast(pc_i32 +% offset_i32);
 }
 
 /// 001[cond]000[imm8]: JR cond, imm8: Relative Jump to address imm8
@@ -583,7 +602,7 @@ fn JR_cond_imm8(self: *CPU) void {
     if (self.checkCondition(cond)) {
         self.JR_imm8();
     } else {
-        self.regs.PC += 1; // skip imm8
+        self.regs.PC +%= 1; // skip imm8
     }
 }
 
@@ -833,9 +852,16 @@ fn CP_A_r8(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn ADD_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+    const old_a = self.regs.A;
+
+    self.regs.A, const c = @addWithOverflow(old_a, imm8);
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, ((old_a & 0x0F) + (imm8 & 0x0F)) > 0x0F);
+    self.setFlag(.C, c == 1);
+    self.regs.PC +%= 1;
 }
 
 /// 11001110[imm8]: ADC A, imm8: Add value imm8 plus the carry flag to
@@ -848,9 +874,19 @@ fn ADD_A_imm8(self: CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADC_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn ADC_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+    const carry = @intFromBool(self.getFlag(.C));
+    const old_a = self.regs.A;
+
+    const sum = @as(u9, old_a) + imm8 + carry;
+
+    self.regs.A = @truncate(sum); // wrap back to u8
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, ((old_a & 0x0F) + (imm8 & 0x0F) + carry) > 0x0F);
+    self.setFlag(.C, sum > 0xFF);
+    self.regs.PC +%= 1;
 }
 
 /// 11010110[imm8]: SUB A, imm8: Subtract value imm8 from register A
@@ -862,9 +898,16 @@ fn ADC_A_imm8(self: CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if imm8 > A)
-fn SUB_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SUB_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+    const old_a = self.regs.A;
+
+    self.regs.A, const c = @subWithOverflow(old_a, imm8);
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, (old_a & 0x0F) < (imm8 & 0x0F));
+    self.setFlag(.C, c == 1);
+    self.regs.PC +%= 1;
 }
 
 /// 11011110[imm8]: SBC A, imm8: Subtract value imm8 and the carry flag from
@@ -877,9 +920,20 @@ fn SUB_A_imm8(self: CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (imm8 + C) > A)
-fn SBC_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SBC_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+    const carry = @intFromBool(self.getFlag(.C));
+    const old_a = self.regs.A;
+
+    const sum = @as(i16, old_a) - imm8 - carry;
+    const half_check = (@as(i16, old_a) & 0xF) - (imm8 & 0xF) - carry;
+
+    self.regs.A = @truncate(@as(u16, @bitCast(sum))); // wrap back to u8
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, half_check < 0);
+    self.setFlag(.C, sum < 0);
+    self.regs.PC +%= 1;
 }
 
 /// 11100110[imm8]: AND A, imm8: A = A & imm8 (bitwise AND)
@@ -891,9 +945,15 @@ fn SBC_A_imm8(self: CPU) void {
 ///     N=0
 ///     H=1
 ///     C=0
-fn AND_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn AND_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+
+    self.regs.A = self.regs.A & imm8;
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, true);
+    self.setFlag(.C, false);
+    self.regs.PC +%= 1;
 }
 
 /// 11101110[imm8]: XOR A, imm8: A = A ^ imm8 (bitwise XOR)
@@ -905,9 +965,15 @@ fn AND_A_imm8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn XOR_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn XOR_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+
+    self.regs.A = self.regs.A ^ imm8;
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, false);
+    self.regs.PC +%= 1;
 }
 
 /// 11110110[imm8]: OR A, imm8: A = A | imm8 (bitwise OR)
@@ -919,9 +985,14 @@ fn XOR_A_imm8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn OR_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn OR_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+    self.regs.A = self.regs.A | imm8;
+    self.setFlag(.Z, self.regs.A == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, false);
+    self.regs.PC +%= 1;
 }
 
 /// 11111110[imm8]: CP A, imm8: ComPare value in register A with value imm8.
@@ -934,27 +1005,36 @@ fn OR_A_imm8(self: CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if imm8 > A)
-fn CP_A_imm8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
-}
+fn CP_A_imm8(self: *CPU) void {
+    const imm8 = self.getImm8(u8);
+    const old_a = self.regs.A;
 
-/// 110[cond]000: RET cond: Return from subroutine if condition cond is met.
-///
-/// Cycles: 5 taken / 2 untaken
-/// Bytes: 1
-fn RET_cond(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+    const res, const c = @subWithOverflow(old_a, imm8);
+    self.setFlag(.Z, res == 0);
+    self.setFlag(.N, true);
+    self.setFlag(.H, (old_a & 0x0F) < (imm8 & 0x0F));
+    self.setFlag(.C, c == 1);
+    self.regs.PC +%= 1;
 }
 
 /// 11001001: RET: Return from subroutine. This is basically a POP PC.
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RET(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RET(self: *CPU) void {
+    self.regs.PC = self.pop() - 1; // -1 to offset the +1 after instruction fetch
+}
+
+/// 110[cond]000: RET cond: Return from subroutine if condition cond is met.
+///
+/// Cycles: 5 taken / 2 untaken
+/// Bytes: 1
+fn RET_cond(self: *CPU) void {
+    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
+
+    if (self.checkCondition(cond)) {
+        self.RET();
+    }
 }
 
 /// 11011001: RETI: Return from interrupt and enable interrupts. This is
@@ -968,52 +1048,62 @@ fn RETI(self: CPU) void {
     @panic("not implemented");
 }
 
+/// 11000011[imm16]: JP imm16: Jump to address imm16 (copy n16 into PC).
+///
+/// Cycles: 4
+/// Bytes: 3
+fn JP_imm16(self: *CPU) void {
+    const imm16 = self.getImm16();
+
+    self.regs.PC = imm16 - 1; // -1 to offset the +1 after instruction fetch
+}
+
 /// 110[cond]010[imm16]: JP cond, imm16: Jump to address imm16 if condition
 /// cond is met.
 ///
 /// Cycles: 4 taken / 3 untaken
 /// Bytes: 3
-fn JP_cond_imm16(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
-}
+fn JP_cond_imm16(self: *CPU) void {
+    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
 
-/// 11000011[imm16]: JP imm16: Jump to address imm16 (copy n16 into PC).
-///
-/// Cycles: 4
-/// Bytes: 3
-fn JP_imm16(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+    if (self.checkCondition(cond)) {
+        self.JP_imm16();
+    } else {
+        self.regs.PC +%= 2; // skip imm16
+    }
 }
 
 /// 11101001: JP HL: Jump to address in HL (copy HL into PC).
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn JP_HL(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn JP_HL(self: *CPU) void {
+    self.regs.PC = self.regs.getHL() - 1; // -1 to offset the +1 after instruction fetch
+}
+
+/// 11001101[imm16]: CALL imm16: Call address imm16. This pushes the address
+/// of the instruction after the CALL on the stack, such that RET can pop it
+/// later; then, it executes an implicit JP imm16
+///
+/// Cycles: 6
+/// Bytes: 3
+fn CALL_imm16(self: *CPU) void {
+    self.push(self.regs.PC + 3);
+    self.JP_imm16();
 }
 
 /// 110[cond]100: CALL cond, imm16: Call address imm16 if condition cond is met
 ///
 /// Cycles: 6 taken / 3 untaken
 /// Bytes: 3
-fn CALL_cond_imm16(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
-}
+fn CALL_cond_imm16(self: *CPU) void {
+    const cond: u2 = @intCast((self.getOpcode() >> 3) & 0b11);
 
-/// 11001101[imm16]: CALL imm16: Call address imm16. This pushes the address
-/// of the instruction adter the CALL on the stack, such that RET can pop it
-/// later; then, it executes an implicit JP imm16
-///
-/// Cycles: 6
-/// Bytes: 3
-fn CALL_imm16(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+    if (self.checkCondition(cond)) {
+        self.CALL_imm16();
+    } else {
+        self.regs.PC +%= 2; // skip imm16
+    }
 }
 
 /// 11[tgt3]111: RST tgt3: Call to address tgt3*8
@@ -1332,526 +1422,830 @@ fn SET_b3_r8(self: CPU) void {
 
 test "NOP" {
     // setup fake RAM
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "LD_r16_imm16" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
-    RAM[0] = 0b00000001; // Opcode for LD BC, imm16
-    RAM[1] = 0x34; // Low byte
-    RAM[2] = 0x12; // High byte
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0, 0b00000001); // Opcode for LD BC, imm16
+    mmio.write(1, 0x34); // Low byte
+    mmio.write(2, 0x12); // High byte
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.B == 0x34); // Low byte
-    try std.testing.expect(cpu.regs.C == 0x12); // High byte
-    try std.testing.expect(cpu.regs.PC == 3);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x34, cpu.regs.B); // Low byte
+    try std.testing.expectEqual(0x12, cpu.regs.C); // High byte
+    try std.testing.expectEqual(3, cpu.regs.PC);
 
-    RAM[3] = 0b00110001; // Opcode for LD SP, imm16
-    RAM[4] = 0x78; // Low byte
-    RAM[5] = 0x56; // High byte
+    mmio.write(3, 0b00110001); // Opcode for LD SP, imm16
+    mmio.write(4, 0x78); // Low byte
+    mmio.write(5, 0x56); // High byte
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.SP == 0x7856);
-    try std.testing.expect(cpu.regs.PC == 6);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x7856, cpu.regs.SP);
+    try std.testing.expectEqual(6, cpu.regs.PC);
 }
 
 test "LD_r16mem_A" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0xAB; // A register
-    RAM[0] = 0b00000010; // Opcode for LD (BC), A
+    mmio.write(0, 0b00000010); // Opcode for LD (BC), A
     cpu.regs.B = 0x34; // B register (high byte of BC)
     cpu.regs.C = 0x12; // C register (low byte of BC)
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(RAM[0x3412] == 0xAB);
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xAB, mmio.read(0x3412));
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b00100010; // Opcode for LD (HLI), A
+    mmio.write(1, 0b00100010); // Opcode for LD (HLI), A
     cpu.regs.H = 0x56; // H register (high byte of HL)
     cpu.regs.L = 0xFF; // L register (low byte of HL)
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(RAM[0x56FF] == 0xAB);
-    try std.testing.expect(cpu.regs.H == 0x57);
-    try std.testing.expect(cpu.regs.L == 0x00);
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xAB, mmio.read(0x56FF));
+    try std.testing.expectEqual(0x57, cpu.regs.H);
+    try std.testing.expectEqual(0x00, cpu.regs.L);
+    try std.testing.expectEqual(2, cpu.regs.PC);
 
-    RAM[2] = 0b00110010; // Opcode for LD (HLD), A
+    mmio.write(2, 0b00110010); // Opcode for LD (HLD), A
     cpu.regs.H = 0x4A; // H register (high byte of HL)
     cpu.regs.L = 0xBC; // L register (low byte of HL)
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(RAM[0x4ABC] == 0xAB);
-    try std.testing.expect(cpu.regs.H == 0x4A);
-    try std.testing.expect(cpu.regs.L == 0xBB);
-    try std.testing.expect(cpu.regs.PC == 3);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xAB, mmio.read(0x4ABC));
+    try std.testing.expectEqual(0x4A, cpu.regs.H);
+    try std.testing.expectEqual(0xBB, cpu.regs.L);
+    try std.testing.expectEqual(3, cpu.regs.PC);
 }
 
 test "LD_A_r16mem" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
-    RAM[0x3412] = 0xCD;
-    RAM[0] = 0b00001010; // Opcode for LD A, (BC)
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0x3412, 0xCD);
+    mmio.write(0, 0b00001010); // Opcode for LD A, (BC)
     cpu.regs.B = 0x34; // B register (high byte of BC)
     cpu.regs.C = 0x12; // C register (low byte of BC)
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0xCD); // A register
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xCD, cpu.regs.A); // A register
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "LD_imm16_SP" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.SP = 0x9ABC;
-    RAM[0] = 0b00001000; // Opcode for LD (imm16), SP
-    RAM[1] = 0x10; // Low byte of imm16
-    RAM[2] = 0x80; // High byte of imm16
+    mmio.write(0, 0b00001000); // Opcode for LD (imm16), SP
+    mmio.write(1, 0x10); // Low byte of imm16
+    mmio.write(2, 0x80); // High byte of imm16
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(RAM[0x1080] == 0xBC); // Low byte of SP
-    try std.testing.expect(RAM[0x1081] == 0x9A); // High byte of SP
-    try std.testing.expect(cpu.regs.PC == 3);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xBC, mmio.read(0x1080)); // Low byte of SP
+    try std.testing.expectEqual(0x9A, mmio.read(0x1081)); // High byte of SP
+    try std.testing.expectEqual(3, cpu.regs.PC);
 }
 
 test "INC_r16" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.B = 0xFF; // B register
     cpu.regs.C = 0xFF; // C register
-    RAM[0] = 0b00000011; // Opcode for INC BC
+    mmio.write(0, 0b00000011); // Opcode for INC BC
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.B == 0x00); // B register
-    try std.testing.expect(cpu.regs.C == 0x00); // C register
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x00, cpu.regs.B); // B register
+    try std.testing.expectEqual(0x00, cpu.regs.C); // C register
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
     cpu.regs.SP = 0x1234; // SP
-    RAM[1] = 0b00110011; // Opcode for INC SP
+    mmio.write(1, 0b00110011); // Opcode for INC SP
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.SP == 0x1235); // SP
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1235, cpu.regs.SP); // SP
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "DEC_r16" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.B = 0x00; // B register
     cpu.regs.C = 0x00; // C register
-    RAM[0] = 0b00001011; // Opcode for DEC BC
+    mmio.write(0, 0b00001011); // Opcode for DEC BC
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.B == 0xFF); // B register
-    try std.testing.expect(cpu.regs.C == 0xFF); // C register
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xFF, cpu.regs.B); // B register
+    try std.testing.expectEqual(0xFF, cpu.regs.C); // C register
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
     cpu.regs.SP = 0x0000; // SP
-    RAM[1] = 0b00111011; // Opcode for DEC SP
+    mmio.write(1, 0b00111011); // Opcode for DEC SP
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.SP == 0xFFFF); // SP
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xFFFF, cpu.regs.SP); // SP
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "ADD_HL_r16" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.H = 0x1F; // H register
     cpu.regs.L = 0x34; // L register
     cpu.regs.B = 0x01; // B register
     cpu.regs.C = 0x10; // C register
-    RAM[0] = 0b00001001; // Opcode for ADD HL, BC
+    mmio.write(0, 0b00001001); // Opcode for ADD HL, BC
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.H == 0x20);
-    try std.testing.expect(cpu.regs.L == 0x44);
-    try std.testing.expect(cpu.regs.F == 0b00100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x20, cpu.regs.H);
+    try std.testing.expectEqual(0x44, cpu.regs.L);
+    try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
     cpu.regs.F = 0b10100000;
     cpu.regs.H = 0xFF; // H register
     cpu.regs.L = 0xFF; // L register
     cpu.regs.D = 0x00; // D register
     cpu.regs.E = 0x01; // E register
-    RAM[1] = 0b00011001; // Opcode for ADD HL, DE
+    mmio.write(1, 0b00011001); // Opcode for ADD HL, DE
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.H == 0x00);
-    try std.testing.expect(cpu.regs.L == 0x00);
-    try std.testing.expect(cpu.regs.F == 0b10110000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x00, cpu.regs.H);
+    try std.testing.expectEqual(0x00, cpu.regs.L);
+    try std.testing.expectEqual(0b10110000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "INC_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0xFF; // A register
-    RAM[0] = 0b00111100; // Opcode for INC A
+    mmio.write(0, 0b00111100); // Opcode for INC A
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x00); // A register
-    try std.testing.expect(cpu.regs.F == 0b10100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x00, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b10100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "DEC_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x00; // A register
-    RAM[0] = 0b00111101; // Opcode for DEC A
+    mmio.write(0, 0b00111101); // Opcode for DEC A
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0xFF); // A register
-    try std.testing.expect(cpu.regs.F == 0b01100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xFF, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "LD_r8_imm8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
-    RAM[0] = 0b00000110; // Opcode for LD B, imm8
-    RAM[1] = 0x7A; // imm8 value
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0, 0b00000110); // Opcode for LD B, imm8
+    mmio.write(1, 0x7A); // imm8 value
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.B == 0x7A); // B register
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x7A, cpu.regs.B); // B register
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "RLCA" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b10000001; // A register
-    RAM[0] = 0b00000111; // Opcode for RLCA
+    mmio.write(0, 0b00000111); // Opcode for RLCA
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b00000011); // A register
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b00000011, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "RRCA" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b00000011; // A register
-    RAM[0] = 0b00001111; // Opcode for RRCA
+    mmio.write(0, 0b00001111); // Opcode for RRCA
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b10000001); // A register
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b10000001, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "RLA" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b10000001; // A register
     cpu.regs.F = 0b00010000; // Set Carry flag
-    RAM[0] = 0b00010111; // Opcode for RLA
+    mmio.write(0, 0b00010111); // Opcode for RLA
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b00000011); // A register
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b00000011, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "RRA" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b00000011; // A register
     cpu.regs.F = 0b00010000; // Set Carry flag
-    RAM[0] = 0b00011111; // Opcode for RRA
+    mmio.write(0, 0b00011111); // Opcode for RRA
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b10000001); // A register
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b10000001, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "DAA" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x98; // A register
     cpu.regs.F = 0b01110000; // Clear all flags
-    RAM[0] = 0b00100111; // Opcode for DAA
+    mmio.write(0, 0b00100111); // Opcode for DAA
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x98 - 0x66);
-    try std.testing.expect(cpu.regs.F == 0b01010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x98 - 0x66, cpu.regs.A);
+    try std.testing.expectEqual(0b01010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
     cpu.regs.A = 0x12; // A register
     cpu.regs.F = 0b00110000; // Set N flag
-    RAM[1] = 0b00100111; // Opcode for DAA
+    mmio.write(1, 0b00100111); // Opcode for DAA
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x12 + 0x66);
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x12 + 0x66, cpu.regs.A);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "CPL" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b10101010; // A register
-    RAM[0] = 0b00101111; // Opcode for CPL
+    mmio.write(0, 0b00101111); // Opcode for CPL
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b01010101); // A register
-    try std.testing.expect(cpu.regs.F == 0b01100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b01010101, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "SCF" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.F = 0b00000000; // Clear all flags
-    RAM[0] = 0b00110111; // Opcode for SCF
+    mmio.write(0, 0b00110111); // Opcode for SCF
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "CCF" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.F = 0b00010000; // Set Carry flag
-    RAM[0] = 0b00111111; // Opcode for CCF
+    mmio.write(0, 0b00111111); // Opcode for CCF
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b00111111; // Opcode for CCF
+    mmio.write(1, 0b00111111); // Opcode for CCF
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.F == 0b00010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "JR_imm8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
-    RAM[0] = 0b00011000; // Opcode for JR imm8
-    RAM[1] = 0x05; // imm8 value
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0, 0b00011000); // Opcode for JR imm8
+    mmio.write(1, 0x05); // imm8 value
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.PC == 0x07); // PC should be 0 + 2 + 5
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x07, cpu.regs.PC); // PC should be 0 + 2 + 5
 
-    RAM[8] = @bitCast(@as(i8, -2)); // imm8 value to jump back
-    RAM[7] = 0b00011000; // Opcode for JR imm8
+    mmio.write(8, @bitCast(@as(i8, -2))); // imm8 value to jump back
+    mmio.write(7, 0b00011000); // Opcode for JR imm8
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.PC == 0x07); // PC should be 7 + 2 - 2
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x07, cpu.regs.PC); // PC should be 7 + 2 - 2
 }
 
 test "JR_cond_imm8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
-    RAM[0] = 0b00100000; // Opcode for JR NZ, imm8
-    RAM[1] = 0x04; // imm8 value
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0, 0b00100000); // Opcode for JR NZ, imm8
+    mmio.write(1, 0x04); // imm8 value
     cpu.regs.F = 0b00000000; // Z flag not set
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.PC == 0x06); // PC should be 0 + 2 + 4
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x06, cpu.regs.PC); // PC should be 0 + 2 + 4
 
-    RAM[6] = 0b00100000; // Opcode for JR NZ, imm8
-    RAM[7] = 0x04; // imm8 value
+    mmio.write(6, 0b00100000); // Opcode for JR NZ, imm8
+    mmio.write(7, 0x04); // imm8 value
     cpu.regs.F = 0b10000000; // Z flag set
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.PC == 0x08); // PC should be 6 + 2
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x08, cpu.regs.PC); // PC should be 6 + 2
 }
 
 test "STOP" {
-    // var RAM: [0x8000]u8 = @splat(0);
-    // var cpu = CPU.init(&RAM);
-    // RAM[0] = 0b01110110; // Opcode for HALT
+    // var mmio = MMIO.init();
+    // var cpu = CPU.init(&mmio);
+    // mmio.write(0, 0b01110110); // Opcode for HALT
     // cpu.execute();
-    // cpu.regs.PC += 1;
-    // try std.testing.expect(cpu.halted == true);
-    // try std.testing.expect(cpu.registers.PC == 1);
+    // cpu.regs.PC +%= 1;
+    // try std.testing.expectEqual(true, cpu.halted);
+    // try std.testing.expectEqual(1, cpu.registers.PC);
 }
 
 test "LD_r8_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.B = 0x56; // B register
-    RAM[0] = 0b01000000; // Opcode for LD B, B
+    mmio.write(0, 0b01000000); // Opcode for LD B, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.B == 0x56); // B register
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x56, cpu.regs.B); // B register
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
     cpu.regs.C = 0x78; // C register
-    RAM[1] = 0b01000001; // Opcode for LD B, C
+    mmio.write(1, 0b01000001); // Opcode for LD B, C
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.B == 0x78); // B register
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x78, cpu.regs.B); // B register
+    try std.testing.expectEqual(2, cpu.regs.PC);
 
     cpu.setR16(2, 0x9A); // DE register
 }
 
 test "HALT" {
-    // var RAM: [0x8000]u8 = @splat(0);
-    // var cpu = CPU.init(&RAM);
-    // RAM[0] = 0b01110110; // Opcode for HALT
+    // var mmio = MMIO.init();
+    // var cpu = CPU.init(&mmio);
+    // mmio.write(0, 0b01110110); // Opcode for HALT
     // cpu.execute();
-    // cpu.regs.PC += 1;
-    // try std.testing.expect(cpu.halted == true);
-    // try std.testing.expect(cpu.registers.PC == 1);
+    // cpu.regs.PC +%= 1;
+    // try std.testing.expectEqual(true, cpu.halted);
+    // try std.testing.expectEqual(1, cpu.registers.PC);
 }
 
 test "ADD_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x14;
     cpu.regs.B = 0x28;
-    RAM[0] = 0b10000000; // Opcode for ADD A, B
+    mmio.write(0, 0b10000000); // Opcode for ADD A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x3C); // A register
-    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x3C, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b10000000; // Opcode for ADD A, B
+    mmio.write(1, 0b10000000); // Opcode for ADD A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x64); // A register
-    try std.testing.expect(cpu.regs.F == 0b00100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x64, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "ADC_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x14;
     cpu.regs.B = 0x28;
     cpu.regs.F = 0b00010000; // Set Carry flag
-    RAM[0] = 0b10001000; // Opcode for ADC A, B
+    mmio.write(0, 0b10001000); // Opcode for ADC A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x3D);
-    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x3D, cpu.regs.A);
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b10001000; // Opcode for ADC A, B
+    mmio.write(1, 0b10001000); // Opcode for ADC A, B
     cpu.regs.B = 0xC2;
     cpu.regs.F = 0b00110000; // Set Carry flag
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x00);
-    try std.testing.expect(cpu.regs.F == 0b10110000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x00, cpu.regs.A);
+    try std.testing.expectEqual(0b10110000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "SUB_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x50;
     cpu.regs.B = 0x20;
-    RAM[0] = 0b10010000; // Opcode for SUB A, B
+    mmio.write(0, 0b10010000); // Opcode for SUB A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x30); // A register
-    try std.testing.expect(cpu.regs.F == 0b01000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x30, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b10010000; // Opcode for SUB A, B
+    mmio.write(1, 0b10010000); // Opcode for SUB A, B
     cpu.regs.B = 0x01;
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x2F); // A register
-    try std.testing.expect(cpu.regs.F == 0b01100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x2F, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "SBC_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x50;
     cpu.regs.B = 0x20;
-    RAM[0] = 0b10011000; // Opcode for SBC A, B
+    mmio.write(0, 0b10011000); // Opcode for SBC A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x30); // A register
-    try std.testing.expect(cpu.regs.F == 0b01000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x30, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b10011000; // Opcode for SBC A, B
+    mmio.write(1, 0b10011000); // Opcode for SBC A, B
     cpu.regs.B = 0x30;
     cpu.regs.F = 0b01110000; // Set Carry flag
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0xFF); // A register
-    try std.testing.expect(cpu.regs.F == 0b01110000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xFF, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01110000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
 
 test "AND_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b11001100;
     cpu.regs.B = 0b10101010;
-    RAM[0] = 0b10100000; // Opcode for AND A, B
+    mmio.write(0, 0b10100000); // Opcode for AND A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b10001000); // A register
-    try std.testing.expect(cpu.regs.F == 0b00100000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b10001000, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "XOR_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b11001100;
     cpu.regs.B = 0b10101010;
-    RAM[0] = 0b10101000; // Opcode for XOR A, B
+    mmio.write(0, 0b10101000); // Opcode for XOR A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b01100110); // A register
-    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b01100110, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "OR_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0b11001100;
     cpu.regs.B = 0b10101010;
-    RAM[0] = 0b10110000; // Opcode for OR A, B
+    mmio.write(0, 0b10110000); // Opcode for OR A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0b11101110); // A register
-    try std.testing.expect(cpu.regs.F == 0b00000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b11101110, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 }
 
 test "CP_A_r8" {
-    var RAM: [0x8000]u8 = @splat(0);
-    var cpu = CPU.init(&RAM);
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
     cpu.regs.A = 0x50;
     cpu.regs.B = 0x20;
-    RAM[0] = 0b10111000; // Opcode for CP A, B
+    mmio.write(0, 0b10111000); // Opcode for CP A, B
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x50); // A register unchanged
-    try std.testing.expect(cpu.regs.F == 0b01000000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 1);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
+    try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(1, cpu.regs.PC);
 
-    RAM[1] = 0b10111000; // Opcode for CP A, B
+    mmio.write(1, 0b10111000); // Opcode for CP A, B
     cpu.regs.B = 0x60;
     cpu.execute();
-    cpu.regs.PC += 1;
-    try std.testing.expect(cpu.regs.A == 0x50); // A register unchanged
-    try std.testing.expect(cpu.regs.F == 0b01010000); // Check Flags
-    try std.testing.expect(cpu.regs.PC == 2);
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
+    try std.testing.expectEqual(0b01010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
 }
+
+test "ADD_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0x10;
+    mmio.write(0, 0b11000110); // Opcode for ADD A, imm8
+    mmio.write(1, 0x22); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x32, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    mmio.write(2, 0b11000110); // Opcode for ADD A, imm8
+    mmio.write(3, 0xD0); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x02, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "ADC_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0x10;
+    cpu.regs.F = 0b00010000; // Set Carry flag
+    mmio.write(0, 0b11001110); // Opcode for ADC A, imm8
+    mmio.write(1, 0x22); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x33, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    mmio.write(2, 0b11001110); // Opcode for ADC A, imm8
+    mmio.write(3, 0xD0); // imm8 value
+    cpu.regs.F = 0b00110000; // Set Carry flag
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x04, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SUB_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0x50;
+    mmio.write(0, 0b11010110); // Opcode for SUB A, imm8
+    mmio.write(1, 0x20); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x30, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    mmio.write(2, 0b11010110); // Opcode for SUB A, imm8
+    mmio.write(3, 0x31); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xFF, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01110000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SBC_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0x50;
+    mmio.write(0, 0b11011110); // Opcode for SBC A, imm8
+    mmio.write(1, 0x20); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x30, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    mmio.write(2, 0b11011110); // Opcode for SBC A, imm8
+    mmio.write(3, 0x31); // imm8 value
+    cpu.regs.F = 0b01110000; // Set Carry flag
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0xFE, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b01110000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "AND_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0b11001100;
+    mmio.write(0, 0b11100110); // Opcode for AND A, imm8
+    mmio.write(1, 0b10101010); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b10001000, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00100000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+}
+
+test "XOR_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0b11001100;
+    mmio.write(0, 0b11101110); // Opcode for XOR A, imm8
+    mmio.write(1, 0b10101010); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b01100110, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+}
+
+test "OR_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0b11001100;
+    mmio.write(0, 0b11110110); // Opcode for OR A, imm8
+    mmio.write(1, 0b10101010); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0b11101110, cpu.regs.A); // A register
+    try std.testing.expectEqual(0b00000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+}
+
+test "CP_A_imm8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.A = 0x50;
+    mmio.write(0, 0b11111110); // Opcode for CP A, imm8
+    mmio.write(1, 0x20); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
+    try std.testing.expectEqual(0b01000000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    mmio.write(2, 0b11111110); // Opcode for CP A, imm8
+    mmio.write(3, 0x60); // imm8 value
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x50, cpu.regs.A); // A register unchanged
+    try std.testing.expectEqual(0b01010000, cpu.regs.F); // Check Flags
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "RET" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    // Prepare stack
+    cpu.regs.SP = 0xDFFE;
+    mmio.write(0, 0b11001001); // Opcode for RET
+    mmio.write(0xDFFE, 0x34); // Low byte of return address
+    mmio.write(0xDFFF, 0x12); // High byte of return address
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
+    try std.testing.expectEqual(0xE000, cpu.regs.SP); // SP should be incremented by 2
+}
+
+test "RET_cond" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    // Prepare stack
+    cpu.regs.SP = 0xFFFE;
+    mmio.write(0, 0b11000000); // Opcode for RET NZ
+    mmio.write(0xFFFE, 0x34); // Low byte of return address
+    mmio.write(0xFFFF, 0x12); // High byte of return address
+    cpu.regs.F = 0b00000000; // Z flag not set
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
+    try std.testing.expectEqual(0x0000, cpu.regs.SP); // SP should be incremented by 2
+
+    // Prepare stack again
+    cpu.regs.SP = 0xFFFE;
+    mmio.write(0xFFFE, 0x78); // Low byte of return address
+    mmio.write(0xFFFF, 0x56); // High byte of return address
+    mmio.write(1, 0b11000000); // Opcode for RET NZ
+    cpu.regs.F = 0b10000000; // Z flag set
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1235, cpu.regs.PC); // PC should just increment
+    try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should remain unchanged
+}
+
+// test "RETI" {
+//     var mmio = MMIO.init();
+//     var cpu = CPU.init(&mmio);
+//     // Prepare stack
+//     cpu.regs.SP = 0xFFFE;
+//     mmio.write(0xFFFE, 0x34); // Low byte of return address
+//     mmio.write(0xFFFF, 0x12); // High byte of return address
+//     mmio.write(0, 0b11001011); // Opcode for RETI
+//     cpu.execute();
+//     try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to return address
+//     try std.testing.expectEqual(0x0000, cpu.regs.SP); // SP should be incremented by 2
+//     try std.testing.expectEqual(true, cpu.interrupts_enabled); // Interrupts should be enabled
+// }
+
+test "JP_imm16" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0, 0b11000011); // Opcode for JP imm16
+    mmio.write(1, 0x34); // Low byte of address
+    mmio.write(2, 0x12); // High byte of address
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
+}
+
+test "JP_cond_imm16" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    mmio.write(0, 0b11000010); // Opcode for JP NZ, imm16
+    mmio.write(1, 0x34); // Low byte of address
+    mmio.write(2, 0x12); // High byte of address
+    cpu.regs.F = 0b00000000; // Z flag not set
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
+
+    mmio.write(3, 0b11000010); // Opcode for JP NZ, imm16
+    mmio.write(4, 0x78); // Low byte of address
+    mmio.write(5, 0x56); // High byte of address
+    cpu.regs.F = 0b10000000; // Z flag set
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x3413, cpu.regs.PC); // PC should just increment
+}
+
+test "JP_HL" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.H = 0x12; // H register
+    cpu.regs.L = 0x34; // L register
+    mmio.write(0, 0b11101001); // Opcode for JP HL
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to HL value
+}
+
+test "CALL_imm16" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    // Prepare stack
+    cpu.regs.SP = 0xFFFE;
+
+    mmio.write(0, 0b11001101); // Opcode for CALL imm16
+    mmio.write(1, 0x12); // Low byte of address
+    mmio.write(2, 0x34); // High byte of address
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to address
+    try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
+    try std.testing.expectEqual(0x03, mmio.read(0xFFFC)); // Low byte of return address
+    try std.testing.expectEqual(0x00, mmio.read(0xFFFD)); // High byte of return address
+}
+
+test "CALL_cond_imm16" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    // Prepare stack
+    cpu.regs.SP = 0xFFFE;
+    mmio.write(0, 0b11000100); // Opcode for CALL NZ, imm16
+    mmio.write(1, 0x12); // Low byte of address
+    mmio.write(2, 0x34); // High byte of address
+    cpu.regs.F = 0b00000000; // Z flag not set
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to address
+    try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
+    try std.testing.expectEqual(0x03, mmio.read(0xFFFC)); // Low byte of return address
+    try std.testing.expectEqual(0x00, mmio.read(0xFFFD)); // High byte of return address
+
+    // Prepare stack again
+    cpu.regs.SP = 0xFFFE;
+    mmio.write(0x1234, 0b11000100); // Opcode for CALL NZ, imm16
+    mmio.write(0x1235, 0x56); // Low byte of address
+    mmio.write(0x1236, 0x78); // High byte of address
+    cpu.regs.F = 0b10000000; // Z flag set
+    cpu.execute();
+    cpu.regs.PC +%= 1;
+    try std.testing.expectEqual(0x1237, cpu.regs.PC); // PC should just increment
+    try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should remain unchanged
+}
+
+// test "RST_tgt3" {
+//     var mmio = MMIO.init();
+//     var cpu = CPU.init(&mmio);
+//     // Prepare stack
+//     cpu.regs.SP = 0xFFFE;
+//
+//     mmio.write(0, 0b11011111); // Opcode for RST 38H
+//     cpu.execute();
+//     cpu.regs.PC +%= 1;
+//     try std.testing.expectEqual(0x0038, cpu.regs.PC); // PC should be set to target address
+//     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
+//     try std.testing.expectEqual(0x01, mmio.read(0xFFFC)); // Low byte of return address
+//     try std.testing.expectEqual(0x00, mmio.read(0xFFFD)); // High byte of return address
+//     try std.testing.expectEqual(1, cpu.regs.PC);
+// }

@@ -6,7 +6,7 @@ pub fn main() !void {
 
     std.debug.print("{d}\n", .{gb.cpu.regs.PC});
 
-    gb.cycle();
+    gb.step();
 
     std.debug.print("{d}\n", .{gb.cpu.regs.PC});
 }
@@ -17,7 +17,7 @@ test {
 
 test "context" {
     var gb = GB.init();
-    gb.cycle();
+    gb.step();
 
     try std.testing.expect(gb.cpu.regs.PC == 1);
 }
