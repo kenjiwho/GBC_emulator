@@ -458,7 +458,7 @@ fn RLCA(self: *CPU) void {
 ///    H=0
 ///    C=Set to old bit 0 of A
 fn RRCA(self: *CPU) void {
-    const carry = self.regs.A & 0b00000001;
+    const carry = self.regs.A & 0b1;
 
     self.regs.A = std.math.rotr(u8, self.regs.A, 1);
     self.setFlag(.Z, false);
@@ -499,6 +499,7 @@ fn RLA(self: *CPU) void {
 fn RRA(self: *CPU) void {
     const old_carry: u8 = @intFromBool(self.getFlag(.C));
     const new_carry = self.regs.A & 0b1;
+
     self.regs.A = (self.regs.A >> 1) | (old_carry << 7);
     self.setFlag(.Z, false);
     self.setFlag(.N, false);
@@ -1155,13 +1156,6 @@ fn PUSH_r16stk(self: *CPU) void {
     self.push(value);
 }
 
-/// $CB prefix. The next executed instruction is from the $CB bank portion of
-/// the decode ROM. $CB prefix opcodes behave like two-byte opcodes
-fn CB_prefix(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
-}
-
 /// 11100010: LDH [c], A: Store value of register A into byte at address
 /// $FF00 + C
 ///
@@ -1321,6 +1315,31 @@ fn DI(self: *CPU) void {
 // ------------------------------- end block 4 --------------------------------
 // ------------------------ block 5: CB prefix opcodes ------------------------
 
+/// $CB prefix. The next executed instruction is from the $CB bank portion of
+/// the decode ROM. $CB prefix opcodes behave like two-byte opcodes
+fn CB_prefix(self: *CPU) void {
+    self.opcode = self.fetch();
+
+    switch (self.opcode >> 6) {
+        1 => self.BIT_b3_r8(),
+        2 => self.RES_b3_r8(),
+        3 => self.SET_b3_r8(),
+        else => {
+            switch (self.opcode >> 3) {
+                0 => self.RLC_r8(),
+                1 => self.RRC_r8(),
+                2 => self.RL_r8(),
+                3 => self.RR_r8(),
+                4 => self.SLA_r8(),
+                5 => self.SRA_r8(),
+                6 => self.SWAP_r8(),
+                7 => self.SRL_r8(),
+                else => @panic("unreachable"),
+            }
+        },
+    }
+}
+
 /// 00000[r8]: RLC r8: Rotate register r8 left. Old bit 7 to carry flag
 ///
 /// Cycles: 2
@@ -1330,9 +1349,18 @@ fn DI(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn RLC_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RLC_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const carry = value >> 7;
+
+    value = std.math.rotl(u8, value, 1);
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 00001[r8]: RRC r8: Rotate register r8 right. Old bit 0 to carry flag
@@ -1344,9 +1372,18 @@ fn RLC_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn RRC_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RRC_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const carry = value & 0b1;
+
+    value = std.math.rotr(u8, value, 1);
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 00010[r8]: RL r8: Rotate register r8 left, through carry flag
@@ -1358,9 +1395,19 @@ fn RRC_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn RL_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RL_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const old_carry = @intFromBool(self.getFlag(.C));
+    const new_carry = (value >> 7) & 0b1;
+
+    value = (value << 1) | old_carry;
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, new_carry == 1);
 }
 
 /// 00011[r8]: RR r8: Rotate register r8 right, through carry flag
@@ -1372,9 +1419,19 @@ fn RL_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn RR_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RR_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const old_carry: u8 = @intFromBool(self.getFlag(.C));
+    const new_carry = value & 0b1;
+
+    value = (value >> 1) | (old_carry << 7);
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, false);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, new_carry == 1);
 }
 
 /// 00100[r8]: SLA r8: Shift Left Arithmetically register r8 left into carry
@@ -1387,9 +1444,18 @@ fn RR_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn SLA_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SLA_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const carry = value >> 7;
+
+    value <<= 1;
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, value == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 00101[r8]: SRA r8: Shift Right Arithmetically register r8 right into carry
@@ -1402,9 +1468,20 @@ fn SLA_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn SRA_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SRA_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const carry = value & 0b1;
+    const bit7 = value & 0b10000000;
+
+    value >>= 1;
+    value |= bit7;
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, value == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 00110[r8]: SWAP r8: Swap upper & lower 4 bits of register r8
@@ -1416,9 +1493,19 @@ fn SRA_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn SWAP_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SWAP_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const high = value >> 4;
+    const low = value & 0xF;
+
+    value = (low << 4) | high;
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, value == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, false);
 }
 
 /// 00111[r8]: SRL r8: Shift Right Logically register r8 right into carry
@@ -1431,9 +1518,18 @@ fn SWAP_r8(self: CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn SRL_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SRL_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    var value = self.getR8(r8);
+    const carry = value & 0b1;
+
+    value >>= 1;
+
+    self.setR8(r8, value);
+    self.setFlag(.Z, value == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, false);
+    self.setFlag(.C, carry == 1);
 }
 
 /// 01[b3][r8]: BIT b3, r8: Test bit b3 in register r8, set zero flag if bit
@@ -1445,9 +1541,16 @@ fn SRL_r8(self: CPU) void {
 ///     Z=Set if bit b3 is 0
 ///     N=0
 ///     H=1
-fn BIT_b3_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn BIT_b3_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    const b3: u3 = @intCast((self.opcode >> 3) & 0b111);
+    const value = self.getR8(r8);
+
+    const bit = (value >> b3) & 0b1;
+
+    self.setFlag(.Z, bit == 0);
+    self.setFlag(.N, false);
+    self.setFlag(.H, true);
 }
 
 /// 10[b3][r8]: RES b3, r8: Set bit b3 in register r8 to 0. Bit 0 is the
@@ -1455,9 +1558,14 @@ fn BIT_b3_r8(self: CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn RES_b3_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn RES_b3_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    const b3: u3 = @intCast((self.opcode >> 3) & 0b111);
+    var value = self.getR8(r8);
+
+    value &= (@as(u8, 1) << b3) ^ 0xFF;
+
+    self.setR8(r8, value);
 }
 
 /// 11[b3][r8]: SET b3, r8: Set bit b3 in register r8 to 1. Bit 0 is the
@@ -1465,9 +1573,14 @@ fn RES_b3_r8(self: CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn SET_b3_r8(self: CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn SET_b3_r8(self: *CPU) void {
+    const r8: u3 = @intCast(self.opcode & 0b111);
+    const b3: u3 = @intCast((self.opcode >> 3) & 0b111);
+    var value = self.getR8(r8);
+
+    value |= @as(u8, 1) << b3;
+
+    self.setR8(r8, value);
 }
 
 test "NOP" {
@@ -2399,4 +2512,244 @@ test "OpcodeHole" {
     var cpu = CPU.init(&mmio);
     mmio.write(0, 0xD3); // Invalid Opcode
     try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(1, 0xDB);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(2, 0xDD);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(3, 0xE3);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(4, 0xE4);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(5, 0xEB);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(6, 0xEC);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(7, 0xED);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(8, 0xF4);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(9, 0xFC);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+    mmio.write(10, 0xFD);
+    try std.testing.expectError(CpuError.InvalidOpcode, cpu.execute());
+}
+
+// ------------------------ CB prefix tests ----------------------
+test "RLC_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00000000); // Opcode for RLC B
+    try cpu.execute();
+    try std.testing.expectEqual(0b00000011, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00000110); // Opcode for RLC (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b10000001, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "RRC_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00001000); // Opcode for RRC B
+    try cpu.execute();
+    try std.testing.expectEqual(0b11000000, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00001110); // Opcode for RRC (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b01100000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00000000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "RL_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    cpu.regs.F = 0b00010000; // Set Carry flag
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00010000); // Opcode for RL B
+    try cpu.execute();
+    try std.testing.expectEqual(0b00000011, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    cpu.regs.F = 0b00000000; // Clear Carry flag
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00010110); // Opcode for RL (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b10000000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "RR_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    cpu.regs.F = 0b00010000; // Set Carry flag
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00011000); // Opcode for RR B
+    try cpu.execute();
+    try std.testing.expectEqual(0b11000000, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    cpu.regs.F = 0b00000000; // Clear Carry flag
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00011110); // Opcode for RR (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b01100000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00000000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SLA_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00100000); // Opcode for SLA B
+    try cpu.execute();
+    try std.testing.expectEqual(0b00000010, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00100110); // Opcode for SLA (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b10000000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SRA_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00101000); // Opcode for SRA B
+    try cpu.execute();
+    try std.testing.expectEqual(0b11000000, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00101110); // Opcode for SRA (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b11100000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00000000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SWAP_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10110001; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00110000); // Opcode for SWAP B
+    try cpu.execute();
+    try std.testing.expectEqual(0b00011011, cpu.regs.B);
+    try std.testing.expectEqual(0b00000000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b10110001); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00110110); // Opcode for SWAP (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b00011011, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00000000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SRL_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b10000001; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b00111000); // Opcode for SRL B
+    try cpu.execute();
+    try std.testing.expectEqual(0b01000000, cpu.regs.B);
+    try std.testing.expectEqual(0b00010000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11000000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b00111110); // Opcode for SRL (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b01100000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00000000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "BIT_b3_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b00001000; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b01000000); // Opcode for BIT 0, B
+    try cpu.execute();
+    try std.testing.expectEqual(0b10100000, cpu.regs.F);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b00001000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b01011110); // Opcode for BIT 3, (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b00001000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(0b00100000, cpu.regs.F);
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "RES_b3_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b11111111; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b10000000); // Opcode for RES 0, B
+    try cpu.execute();
+    try std.testing.expectEqual(0b11111110, cpu.regs.B);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b11111111); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b10011110); // Opcode for RES 3, (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b11110111, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(4, cpu.regs.PC);
+}
+
+test "SET_b3_r8" {
+    var mmio = MMIO.init();
+    var cpu = CPU.init(&mmio);
+    cpu.regs.B = 0b00000000; // B register
+    mmio.write(0, 0b11001011); // CB Prefix
+    mmio.write(1, 0b11000000); // Opcode for SET 0, B
+    try cpu.execute();
+    try std.testing.expectEqual(0b00000001, cpu.regs.B);
+    try std.testing.expectEqual(2, cpu.regs.PC);
+
+    cpu.setR8(6, 0b00000000); // (HL)
+    mmio.write(2, 0b11001011); // CB Prefix
+    mmio.write(3, 0b11011110); // Opcode for SET 3, (HL)
+    try cpu.execute();
+    try std.testing.expectEqual(0b00001000 | 0b00001000, cpu.getR8(6)); // (HL)
+    try std.testing.expectEqual(4, cpu.regs.PC);
 }
