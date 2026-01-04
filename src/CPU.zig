@@ -53,12 +53,44 @@ pub fn step(self: *CPU) !void {
     const next_IME = self.IME_scheduled;
 
     try self.execute();
+    // ----------------------- USED IN BLARGG TESTING -----------------------
+    try self.logState();
+    // ----------------------------------------------------------------------
 
     if (next_IME) {
         self.IME = true;
         self.IME_scheduled = false;
     }
 }
+
+// ----------------------- USED IN BLARGG TESTING -----------------------
+pub fn logState(self: *const CPU) !void {
+    const cwd = std.fs.cwd();
+    const file = try cwd.createFile("./blargg.log", .{ .truncate = false });
+    defer file.close();
+    var buffer: [256]u8 = undefined;
+    try file.seekFromEnd(0);
+
+    const state = try std.fmt.bufPrint(&buffer, "A:{X:02} F:{X:02} B:{X:02} C:{X:02} D:{X:02} E:{X:02} H:{X:02} L:{X:02} SP:{X:04} PC:{X:04} PCMEM:{X:02},{X:02},{X:02},{X:02}\n", .{
+        self.regs.A,
+        self.regs.F,
+        self.regs.B,
+        self.regs.C,
+        self.regs.D,
+        self.regs.E,
+        self.regs.H,
+        self.regs.L,
+        self.regs.SP,
+        self.regs.PC,
+        self.bus.read(self.regs.PC),
+        self.bus.read(self.regs.PC + 1),
+        self.bus.read(self.regs.PC + 2),
+        self.bus.read(self.regs.PC + 3),
+    });
+
+    _ = try file.write(state);
+}
+// ----------------------------------------------------------------------
 
 fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
     self.IME = false;
@@ -319,8 +351,8 @@ fn getImm8(self: *CPU, T: type) T {
 
 /// Fetches a 16-bit immediate value from the instruction stream
 fn getImm16(self: *CPU) u16 {
-    const high = self.fetch();
     const low = self.fetch();
+    const high = self.fetch();
     return (@as(u16, high) << 8) | low;
 }
 
@@ -1428,7 +1460,7 @@ fn RLC_r8(self: *CPU) void {
     value = std.math.rotl(u8, value, 1);
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, carry == 1);
@@ -1451,7 +1483,7 @@ fn RRC_r8(self: *CPU) void {
     value = std.math.rotr(u8, value, 1);
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, carry == 1);
@@ -1475,7 +1507,7 @@ fn RL_r8(self: *CPU) void {
     value = (value << 1) | old_carry;
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, new_carry == 1);
@@ -1499,7 +1531,7 @@ fn RR_r8(self: *CPU) void {
     value = (value >> 1) | (old_carry << 7);
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, new_carry == 1);
@@ -1669,13 +1701,13 @@ test "LD_r16_imm16" {
     bus.write(1, 0x34); // Low byte
     bus.write(2, 0x12); // High byte
     try cpu.step();
-    try std.testing.expectEqual(0x34, cpu.regs.B); // Low byte
-    try std.testing.expectEqual(0x12, cpu.regs.C); // High byte
+    try std.testing.expectEqual(0x12, cpu.regs.B); // Low byte
+    try std.testing.expectEqual(0x34, cpu.regs.C); // High byte
     try std.testing.expectEqual(3, cpu.regs.PC);
 
     bus.write(3, 0b00110001); // Opcode for LD SP, imm16
-    bus.write(4, 0x78); // Low byte
-    bus.write(5, 0x56); // High byte
+    bus.write(4, 0x56); // Low byte
+    bus.write(5, 0x78); // High byte
     try cpu.step();
     try std.testing.expectEqual(0x7856, cpu.regs.SP);
     try std.testing.expectEqual(6, cpu.regs.PC);
@@ -1731,8 +1763,8 @@ test "LD_imm16_SP" {
     bus.write(1, 0x10); // Low byte of imm16
     bus.write(2, 0x80); // High byte of imm16
     try cpu.step();
-    try std.testing.expectEqual(0xBC, bus.read(0x1080)); // Low byte of SP
-    try std.testing.expectEqual(0x9A, bus.read(0x1081)); // High byte of SP
+    try std.testing.expectEqual(0xBC, bus.read(0x8010)); // Low byte of SP
+    try std.testing.expectEqual(0x9A, bus.read(0x8011)); // High byte of SP
     try std.testing.expectEqual(3, cpu.regs.PC);
 }
 
@@ -2320,8 +2352,8 @@ test "JP_imm16" {
     var bus = Bus.init();
     var cpu = CPU.init(&bus);
     bus.write(0, 0b11000011); // Opcode for JP imm16
-    bus.write(1, 0x34); // Low byte of address
-    bus.write(2, 0x12); // High byte of address
+    bus.write(1, 0x12); // Low byte of address
+    bus.write(2, 0x34); // High byte of address
     try cpu.step();
     try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
 }
@@ -2330,15 +2362,15 @@ test "JP_cond_imm16" {
     var bus = Bus.init();
     var cpu = CPU.init(&bus);
     bus.write(0, 0b11000010); // Opcode for JP NZ, imm16
-    bus.write(1, 0x34); // Low byte of address
-    bus.write(2, 0x12); // High byte of address
+    bus.write(1, 0x12); // Low byte of address
+    bus.write(2, 0x34); // High byte of address
     cpu.regs.F = 0b00000000; // Z flag not set
     try cpu.step();
     try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
 
     bus.write(3, 0b11000010); // Opcode for JP NZ, imm16
-    bus.write(4, 0x78); // Low byte of address
-    bus.write(5, 0x56); // High byte of address
+    bus.write(4, 0x56); // Low byte of address
+    bus.write(5, 0x78); // High byte of address
     cpu.regs.F = 0b10000000; // Z flag set
     try cpu.step();
     try std.testing.expectEqual(0x3413, cpu.regs.PC); // PC should just increment
@@ -2364,7 +2396,7 @@ test "CALL_imm16" {
     bus.write(1, 0x12); // Low byte of address
     bus.write(2, 0x34); // High byte of address
     try cpu.step();
-    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to address
+    try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
     try std.testing.expectEqual(0x03, bus.read(0xFFFC)); // Low byte of return address
     try std.testing.expectEqual(0x00, bus.read(0xFFFD)); // High byte of return address
@@ -2380,19 +2412,19 @@ test "CALL_cond_imm16" {
     bus.write(2, 0x34); // High byte of address
     cpu.regs.F = 0b00000000; // Z flag not set
     try cpu.step();
-    try std.testing.expectEqual(0x1234, cpu.regs.PC); // PC should be set to address
+    try std.testing.expectEqual(0x3412, cpu.regs.PC); // PC should be set to address
     try std.testing.expectEqual(0xFFFC, cpu.regs.SP); // SP should be decremented by 2
     try std.testing.expectEqual(0x03, bus.read(0xFFFC)); // Low byte of return address
     try std.testing.expectEqual(0x00, bus.read(0xFFFD)); // High byte of return address
 
     // Prepare stack again
     cpu.regs.SP = 0xFFFE;
-    bus.write(0x1234, 0b11000100); // Opcode for CALL NZ, imm16
-    bus.write(0x1235, 0x56); // Low byte of address
-    bus.write(0x1236, 0x78); // High byte of address
+    bus.write(0x3412, 0b11000100); // Opcode for CALL NZ, imm16
+    bus.write(0x3413, 0x56); // Low byte of address
+    bus.write(0x3414, 0x78); // High byte of address
     cpu.regs.F = 0b10000000; // Z flag set
     try cpu.step();
-    try std.testing.expectEqual(0x1237, cpu.regs.PC); // PC should just increment
+    try std.testing.expectEqual(0x3415, cpu.regs.PC); // PC should just increment
     try std.testing.expectEqual(0xFFFE, cpu.regs.SP); // SP should remain unchanged
 }
 
@@ -2464,7 +2496,7 @@ test "LD_imm16_A" {
     bus.write(1, 0xC0); // Low byte of address
     bus.write(2, 0x00); // High byte of address
     try cpu.step();
-    try std.testing.expectEqual(0x55, bus.read(0xC000)); // Check memory
+    try std.testing.expectEqual(0x55, bus.read(0x00C0)); // Check memory
     try std.testing.expectEqual(3, cpu.regs.PC);
 }
 
@@ -2494,7 +2526,7 @@ test "LDH_A_imm8" {
 test "LD_A_imm16" {
     var bus = Bus.init();
     var cpu = CPU.init(&bus);
-    bus.write(0xC100, 0x9C); // Memory at address C100
+    bus.write(0x00C1, 0x9C); // Memory at address C100
 
     bus.write(0, 0b11111010); // Opcode for LD A, (imm16)
     bus.write(1, 0xC1); // Low byte of address
