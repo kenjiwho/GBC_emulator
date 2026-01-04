@@ -32,9 +32,21 @@ pub fn init(bus: *Bus) CPU {
 
 // perform a single CPU step with IME, HALT, and interrupt handling
 pub fn step(self: *CPU) !void {
+    const IE = self.bus.read(0xFFFF);
+    const IF = self.bus.read(0xFF0F);
+    const pending_interrupts = IE & IF;
+
     // handle HALT state
     if (self.halted) {
-        return;
+        if (pending_interrupts != 0) {
+            self.halted = false;
+        } else {
+            return;
+        }
+    }
+
+    if (self.IME and pending_interrupts != 0) {
+        return self.serviceInterrupt(pending_interrupts);
     }
 
     // handle IME scheduling
@@ -46,6 +58,25 @@ pub fn step(self: *CPU) !void {
         self.IME = true;
         self.IME_scheduled = false;
     }
+}
+
+fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
+    self.IME = false;
+
+    // find highest priority interrupt
+    // @ctz counts trailing zeros, so we can use it to find the index of the
+    // lowest set bit which is the highest priority interrupt
+    const interrupt_num: u3 = @intCast(@ctz(pending_interrupts));
+    const interrupt_vector = 0x40 + @as(u8, interrupt_num) * 0x08;
+
+    // jump to interrupt handler
+    self.push(self.regs.PC);
+    self.regs.PC = interrupt_vector;
+
+    const IF = self.bus.read(0xFF0F);
+    const bit_mask = @as(u8, 1) << interrupt_num;
+    // clear current handled interrupt flag
+    self.bus.write(0xFF0F, IF & ~bit_mask);
 }
 
 /// execute the next instruction (fetch-decode-execute)
@@ -1201,7 +1232,7 @@ fn PUSH_r16stk(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LDH_C_A(self: CPU) void {
-    const address = @as(u16, 0xFF00) + self.regs.C;
+    const address = 0xFF00 + @as(u16, self.regs.C);
 
     self.bus.write(address, self.regs.A);
 }
@@ -1214,7 +1245,7 @@ fn LDH_C_A(self: CPU) void {
 /// Bytes: 2
 fn LDH_imm8_A(self: *CPU) void {
     const imm8 = self.getImm8(u8);
-    const address = @as(u16, 0xFF00) + imm8;
+    const address = 0xFF00 + @as(u16, imm8);
 
     self.bus.write(address, self.regs.A);
 }
@@ -1235,7 +1266,7 @@ fn LD_imm16_A(self: *CPU) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LDH_A_C(self: *CPU) void {
-    const address = @as(u16, 0xFF00) + self.regs.C;
+    const address = 0xFF00 + @as(u16, self.regs.C);
 
     self.regs.A = self.bus.read(address);
 }
@@ -1247,7 +1278,8 @@ fn LDH_A_C(self: *CPU) void {
 /// Cycles: 3
 /// Bytes: 2
 fn LDH_A_imm8(self: *CPU) void {
-    const address = @as(u16, 0xFF00) + self.getImm8(u8);
+    const imm8 = self.getImm8(u8);
+    const address = 0xFF00 + @as(u16, imm8);
 
     self.regs.A = self.bus.read(address);
 }
@@ -1957,14 +1989,14 @@ test "LD_r8_r8" {
     cpu.setR16(2, 0x9A); // DE register
 }
 
-// test "HALT" {
-//     var bus = Bus.init();
-//     var cpu = CPU.init(&bus);
-//     bus.write(0, 0b01110110); // Opcode for HALT
-//     try cpu.execute();
-//     // try std.testing.expectEqual(true, cpu.halted);
-//     try std.testing.expectEqual(1, cpu.regs.PC);
-// }
+test "HALT" {
+    var bus = Bus.init();
+    var cpu = CPU.init(&bus);
+    bus.write(0, 0b01110110); // Opcode for HALT
+    try cpu.execute();
+    try std.testing.expectEqual(true, cpu.halted);
+    try std.testing.expectEqual(1, cpu.regs.PC);
+}
 
 test "ADD_A_r8" {
     var bus = Bus.init();
