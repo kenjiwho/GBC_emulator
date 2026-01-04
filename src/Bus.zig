@@ -31,7 +31,7 @@ pub fn read(self: *const Bus, address: u16) u8 {
         0xF000...0xFDFF => self.WRAM_S[address - 0xF000], // Echo RAM
         0xFE00...0xFE9F => self.OAM[address - 0xFE00],
         0xFEA0...0xFEFF => 0, // Unusable
-        0xFF00...0xFF7F => self.IOPorts[address - 0xFF00],
+        0xFF00...0xFF7F => self.handleIORead(address),
         0xFF80...0xFFFE => self.HRAM[address - 0xFF80],
         0xFFFF => self.IE,
     };
@@ -49,8 +49,30 @@ pub fn write(self: *Bus, address: u16, value: u8) void {
         0xF000...0xFDFF => self.WRAM_S[address - 0xF000] = value, // Echo RAM
         0xFE00...0xFE9F => self.OAM[address - 0xFE00] = value,
         0xFEA0...0xFEFF => {}, // Unusable
-        0xFF00...0xFF7F => self.IOPorts[address - 0xFF00] = value,
+        0xFF00...0xFF7F => self.handleIOWrite(address, value),
         0xFF80...0xFFFE => self.HRAM[address - 0xFF80] = value,
         0xFFFF => self.IE = value,
     }
 }
+
+// --------------------- USED IN BLARGG TESTING ---------------------
+fn handleIOWrite(self: *Bus, address: u16, value: u8) void {
+    self.IOPorts[address - 0xFF00] = value;
+    // Handle blargg test output to serial port
+    if (address == 0xFF02 and value == 0x81) {
+        const byte = self.read(0xFF01);
+        std.debug.print("{c}", .{byte});
+    }
+}
+
+fn handleIORead(self: *const Bus, address: u16) u8 {
+    // Handle blargg test output to serial port
+    if (address == 0xFF44) {
+        return 0x90;
+    }
+
+    return self.IOPorts[address - 0xFF00];
+}
+
+const std = @import("std");
+// ----------------------------------------------------------------------

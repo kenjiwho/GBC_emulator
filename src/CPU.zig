@@ -53,12 +53,44 @@ pub fn step(self: *CPU) !void {
     const next_IME = self.IME_scheduled;
 
     try self.execute();
+    // ----------------------- USED IN BLARGG TESTING -----------------------
+    try self.logState();
+    // ----------------------------------------------------------------------
 
     if (next_IME) {
         self.IME = true;
         self.IME_scheduled = false;
     }
 }
+
+// ----------------------- USED IN BLARGG TESTING -----------------------
+pub fn logState(self: *const CPU) !void {
+    const cwd = std.fs.cwd();
+    const file = try cwd.createFile("./blargg.log", .{ .truncate = false });
+    defer file.close();
+    var buffer: [256]u8 = undefined;
+    try file.seekFromEnd(0);
+
+    const state = try std.fmt.bufPrint(&buffer, "A:{X:02} F:{X:02} B:{X:02} C:{X:02} D:{X:02} E:{X:02} H:{X:02} L:{X:02} SP:{X:04} PC:{X:04} PCMEM:{X:02},{X:02},{X:02},{X:02}\n", .{
+        self.regs.A,
+        self.regs.F,
+        self.regs.B,
+        self.regs.C,
+        self.regs.D,
+        self.regs.E,
+        self.regs.H,
+        self.regs.L,
+        self.regs.SP,
+        self.regs.PC,
+        self.bus.read(self.regs.PC),
+        self.bus.read(self.regs.PC + 1),
+        self.bus.read(self.regs.PC + 2),
+        self.bus.read(self.regs.PC + 3),
+    });
+
+    _ = try file.write(state);
+}
+// ----------------------------------------------------------------------
 
 fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
     self.IME = false;
@@ -319,8 +351,8 @@ fn getImm8(self: *CPU, T: type) T {
 
 /// Fetches a 16-bit immediate value from the instruction stream
 fn getImm16(self: *CPU) u16 {
-    const high = self.fetch();
     const low = self.fetch();
+    const high = self.fetch();
     return (@as(u16, high) << 8) | low;
 }
 
@@ -1428,7 +1460,7 @@ fn RLC_r8(self: *CPU) void {
     value = std.math.rotl(u8, value, 1);
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, carry == 1);
@@ -1451,7 +1483,7 @@ fn RRC_r8(self: *CPU) void {
     value = std.math.rotr(u8, value, 1);
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, carry == 1);
@@ -1475,7 +1507,7 @@ fn RL_r8(self: *CPU) void {
     value = (value << 1) | old_carry;
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, new_carry == 1);
@@ -1499,7 +1531,7 @@ fn RR_r8(self: *CPU) void {
     value = (value >> 1) | (old_carry << 7);
 
     self.setR8(r8, value);
-    self.setFlag(.Z, false);
+    self.setFlag(.Z, value == 0);
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, new_carry == 1);

@@ -61,5 +61,5 @@ pub fn getAF(self: *const Registers) u16 {
 
 pub fn setAF(self: *Registers, value: u16) void {
     self.A = @intCast(value >> 8);
-    self.F = @intCast(value & 0xFF);
+    self.F = @intCast(value & 0xF0);
 }
