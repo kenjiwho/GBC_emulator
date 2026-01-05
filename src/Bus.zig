@@ -2,6 +2,9 @@
 //! (MMIO) for a Game Boy Color
 const Bus = @This();
 
+const Timer = @import("Timer.zig");
+
+// Memory Map
 ROM_0: [0x4000]u8 = @splat(0), // 16KiB ROM Bank 00: 0000-3FFF
 ROM_S: [0x4000]u8 = @splat(0), // 16KiB Switchable ROM Bank 01-NN: 4000-7FFF
 VRAM: [0x2000]u8 = @splat(0), // 8KiB Video RAM (GBC mode: switchable 0/1): 8000-9FFF
@@ -14,6 +17,17 @@ Unusable: [0x60]u8 = @splat(0), // Usage is prohibited: FEA0-FEFF
 IOPorts: [0x80]u8 = @splat(0), // I/O Registers: FF00-FF7F
 HRAM: [0x7F]u8 = @splat(0), // High RAM: FF80-FFFE
 IE: u8 = 0, // Interrupt Enable Register: FFFF
+
+// Modules
+timer: *Timer = undefined,
+
+const interrupts = enum(u8) {
+    VBlank = 0,
+    LCD = 1,
+    Timer = 2,
+    Serial = 3,
+    Joypad = 4,
+};
 
 pub fn init() Bus {
     return Bus{};
@@ -53,6 +67,12 @@ pub fn write(self: *Bus, address: u16, value: u8) void {
         0xFF80...0xFFFE => self.HRAM[address - 0xFF80] = value,
         0xFFFF => self.IE = value,
     }
+}
+
+pub fn requestInterrupt(self: *Bus, interrupt: interrupts) void {
+    const interrupt_flag = self.read(0xFF0F);
+    const new_flag = interrupt_flag | (1 << @intFromEnum(interrupt));
+    self.write(0xFF0F, new_flag);
 }
 
 // --------------------- USED IN BLARGG TESTING ---------------------

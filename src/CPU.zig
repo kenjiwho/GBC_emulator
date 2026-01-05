@@ -10,7 +10,7 @@ const DispatchFn = *const fn (self: *CPU) CpuError!void;
 
 opcode: u8 = 0, // current opcode
 regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
-bus: *Bus, // reference to the bus struct so instructions can interact with memory
+bus: *Bus = undefined, // reference to the bus struct so instructions can interact with memory
 IME: bool = false,
 IME_scheduled: bool = false, // whether to enable IME after next instruction
 halted: bool = false,
