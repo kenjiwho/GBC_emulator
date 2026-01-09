@@ -47,9 +47,9 @@ pub fn read(self: *const Bus, address: u16) u8 {
         0xF000...0xFDFF => self.WRAM_S[address - 0xF000], // Echo RAM
         0xFE00...0xFE9F => self.OAM[address - 0xFE00],
         0xFEA0...0xFEFF => 0, // Unusable
-        0xFF00...0xFF0E, 0xFF10...0xFF7F => self.handleIORead(address),
+        0xFF00...0xFF7F => self.handleIORead(address),
         0xFF80...0xFFFE => self.HRAM[address - 0xFF80],
-        else => unreachable, // 0xFF0F and 0xFFFF are handled separately
+        0xFFFF => self.IE,
     };
 }
 
@@ -66,9 +66,9 @@ pub fn read_no_tick(self: *const Bus, address: u16) u8 {
         0xF000...0xFDFF => self.WRAM_S[address - 0xF000], // Echo RAM
         0xFE00...0xFE9F => self.OAM[address - 0xFE00],
         0xFEA0...0xFEFF => 0, // Unusable
-        0xFF00...0xFF0E, 0xFF10...0xFF7F => self.handleIORead(address),
+        0xFF00...0xFF7F => self.handleIORead(address),
         0xFF80...0xFFFE => self.HRAM[address - 0xFF80],
-        else => unreachable, // 0xFF0F and 0xFFFF are handled separately
+        0xFFFF => self.IE,
     };
 }
 // ----------------------------------------------------------------------
@@ -93,13 +93,21 @@ pub fn write(self: *Bus, address: u16, value: u8) void {
     }
 }
 
-/// Seperate getters for IF and IE since they should not tick the timer
+/// Seperate getters and setters for IF and IE when they should not tick the timer
 pub fn getIF(self: *const Bus) u8 {
     return self.IOPorts[0x0F];
 }
 
 pub fn getIE(self: *const Bus) u8 {
     return self.IE;
+}
+
+pub fn setIF(self: *Bus, value: u8) void {
+    self.IOPorts[0x0F] = value;
+}
+
+pub fn setIE(self: *Bus, value: u8) void {
+    self.IE = value;
 }
 
 pub fn requestInterrupt(self: *Bus, interrupt: interrupts) void {

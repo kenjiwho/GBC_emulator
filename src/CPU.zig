@@ -93,6 +93,8 @@ pub fn logState(self: *const CPU) !void {
 }
 // ----------------------------------------------------------------------
 
+/// service an interrupt
+/// Cycles: 5
 fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
     self.IME = false;
 
@@ -102,14 +104,16 @@ fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
     const interrupt_num: u3 = @intCast(@ctz(pending_interrupts));
     const interrupt_vector = 0x40 + @as(u8, interrupt_num) * 0x08;
 
-    // jump to interrupt handler
-    self.push(self.regs.PC);
-    self.regs.PC = interrupt_vector;
-
-    const IF = self.bus.read(0xFF0F);
-    const bit_mask = @as(u8, 1) << interrupt_num;
     // clear current handled interrupt flag
-    self.bus.write(0xFF0F, IF & ~bit_mask);
+    const IF = self.bus.getIF();
+    const bit_mask = @as(u8, 1) << interrupt_num;
+    self.bus.setIF(IF & ~bit_mask);
+
+    // jump to interrupt handler
+    self.internalCycle();
+    self.push(self.regs.PC);
+    self.internalCycle();
+    self.regs.PC = interrupt_vector;
 }
 
 /// execute the next instruction (fetch-decode-execute)

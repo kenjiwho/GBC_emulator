@@ -10,8 +10,8 @@ pub fn main() !void {
     defer gb.deinit(allocator);
 
     // ---------------------- USED IN BLARGG TESTING ----------------------
-    try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/01-special.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/02-interrupts.gb");
+    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/01-special.gb");
+    try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/02-interrupts.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/03-op sp,hl.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/04-op r,imm.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/05-op rp.gb");
