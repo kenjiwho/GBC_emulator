@@ -11,7 +11,7 @@ timer: Timer,
 bus: Bus, // memory-mapped I/O
 screen: [160 * 144]u8 = @splat(0), // 160x144 pixels
 
-pub fn init(allocator: Allocator) !*GB {
+pub fn init(allocator: Allocator, rom: []const u8) !*GB {
     // put GB instance on heap so self-references work
     const gb = try allocator.create(GB);
     errdefer allocator.destroy(gb);
@@ -24,34 +24,36 @@ pub fn init(allocator: Allocator) !*GB {
     // connect modules to bus
     gb.bus.timer = &gb.timer;
 
+    // ---------------------- USED IN BLARGG TESTING ----------------------
+    try gb.load_rom(allocator, rom);
+    gb.cpu.regs.PC = 0x0100;
+    gb.cpu.regs.setAF(0x01B0);
+    gb.cpu.regs.setBC(0x0013);
+    gb.cpu.regs.setDE(0x00D8);
+    gb.cpu.regs.setHL(0x014D);
+    gb.cpu.regs.SP = 0xFFFE;
+    // --------------------------------------------------------------------
+
     return gb;
 }
 
 pub fn deinit(self: *GB, allocator: Allocator) void {
+    allocator.free(self.bus.ROM);
     allocator.destroy(self);
 }
 
-pub fn load_rom(self: *GB, rom_file: []const u8) !void {
+fn load_rom(self: *GB, allocator: Allocator, rom_file: []const u8) !void {
     const file = try std.fs.cwd().openFile(rom_file, .{ .mode = .read_only });
     defer file.close();
     var buffer: [0x4000]u8 = undefined;
     var file_reader = file.reader(&buffer);
     const reader = &file_reader.interface;
 
-    // ---------------------------- USED IN BLARGG TESTING ----------------------
-    // check ROM size
     const rom_size = try file.getEndPos();
-    if (rom_size > (self.bus.ROM_0.len + self.bus.ROM_S.len)) {
-        std.debug.print("ROM size (${d} bytes) exceeds maximum supported size (${d} bytes)\n", .{ rom_size, self.bus.ROM_0.len });
-        std.process.exit(1);
-    }
+    const rom = try reader.readAlloc(allocator, rom_size);
 
     // read ROM into memory
-    _ = try reader.readSliceShort(&self.bus.ROM_0);
-    if (rom_size > self.bus.ROM_0.len) {
-        _ = try reader.readSliceShort(&self.bus.ROM_S);
-    }
-    // -------------------------------------------------------------------------
+    self.bus.insertROM(rom);
 }
 
 pub fn run(self: *GB) void {
