@@ -1,5 +1,5 @@
 //! implementation of MBC1 (Memory Bank Controller)
-const MBC1 = @This();
+const Mbc1 = @This();
 
 ROM_S_bank: u5 = 1,
 secondary_bank: u2 = 0, // either upper bits of ROM bank or RAM bank
@@ -7,23 +7,23 @@ mode: bool = false, // behaviour of secondary bank: false = ROM banking mode, tr
 ROM_size: u21,
 num_ROM_banks: u128,
 num_bits_ROM_banks: u3,
-ExternalRAM_enabled: bool = false,
+external_RAM_enabled: bool = false,
 
 // TODO: implement MBC1M support
 
-pub fn init(rom_size_code: u8) MBC1 {
+pub fn init(rom_size_code: u8) Mbc1 {
     const ROM_size: u21 = @as(u21, 0x8000) * (@as(u7, 1) << @intCast(rom_size_code));
     const num_ROM_banks: u128 = ROM_size / 0x4000;
     const num_bits_ROM_banks: u3 = @intFromFloat(@log2(@as(f32, @floatFromInt(num_ROM_banks))));
 
-    return MBC1{
+    return Mbc1{
         .ROM_size = ROM_size,
         .num_ROM_banks = num_ROM_banks,
         .num_bits_ROM_banks = num_bits_ROM_banks,
     };
 }
 
-pub fn setROMBank(self: *MBC1, value: u8) void {
+pub fn setROMBank(self: *Mbc1, value: u8) void {
     var bank: u5 = @truncate(value);
     if (bank == 0) {
         bank = 1;
@@ -31,16 +31,16 @@ pub fn setROMBank(self: *MBC1, value: u8) void {
     self.ROM_S_bank = bank;
 }
 
-pub fn setSecondaryBank(self: *MBC1, value: u8) void {
+pub fn setSecondaryBank(self: *Mbc1, value: u8) void {
     self.secondary_bank = @truncate(value);
 }
 
-pub fn setMode(self: *MBC1, value: u8) void {
+pub fn setMode(self: *Mbc1, value: u8) void {
     self.mode = (value & 0x01) == 1;
 }
 
 /// Map address in 0x4000-0x7FFF to actual ROM address based on current bank
-pub fn mapROMAddress(self: *const MBC1, address: u16) u21 {
+pub fn mapROMAddress(self: *const Mbc1, address: u16) u21 {
     switch (address) {
         0x0000...0x3FFF => {
             var true_address: u21 = @as(u21, address);
@@ -63,7 +63,7 @@ pub fn mapROMAddress(self: *const MBC1, address: u16) u21 {
     }
 }
 
-pub fn mapRAMAddress(self: *const MBC1, address: u16) u15 {
+pub fn mapRAMAddress(self: *const Mbc1, address: u16) u15 {
     var ram_bank: u2 = 0;
     if (self.mode) {
         ram_bank = self.secondary_bank;
@@ -72,10 +72,10 @@ pub fn mapRAMAddress(self: *const MBC1, address: u16) u15 {
     return @intCast(((address - 0xA000) + (@as(u15, ram_bank) * 0x2000)) % 0x8000);
 }
 
-pub fn toggleExternalRAM(self: *MBC1, value: u8) void {
+pub fn toggleExternalRAM(self: *Mbc1, value: u8) void {
     if ((value & 0x0F) == 0xA) {
-        self.ExternalRAM_enabled = true;
+        self.external_RAM_enabled = true;
     } else {
-        self.ExternalRAM_enabled = false;
+        self.external_RAM_enabled = false;
     }
 }

@@ -1,12 +1,12 @@
 //! CPU module: implements the main CPU functionality
-const CPU = @This();
+const Cpu = @This();
 
 const std = @import("std");
 const Registers = @import("Registers.zig");
 const Bus = @import("Bus.zig");
 
 // opcode function type
-const DispatchFn = *const fn (self: *CPU) CpuError!void;
+const DispatchFn = *const fn (self: *Cpu) CpuError!void;
 
 opcode: u8 = 0, // current opcode
 regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (AF, BC, DE, HL) + stack pointer + program counter
@@ -28,12 +28,12 @@ pub const CpuError = error{
     InvalidOpcode,
 };
 
-pub fn init(bus: *Bus) CPU {
-    return CPU{ .bus = bus };
+pub fn init(bus: *Bus) Cpu {
+    return Cpu{ .bus = bus };
 }
 
 /// perform a single CPU step with IME, HALT, and interrupt handling
-pub fn step(self: *CPU) !void {
+pub fn step(self: *Cpu) !void {
     const IE = self.bus.IE;
     const IF = self.bus.io.getIF();
     const pending_interrupts = IE & IF;
@@ -77,7 +77,7 @@ pub fn step(self: *CPU) !void {
 
 /// service an interrupt
 /// Cycles: 5
-fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
+fn serviceInterrupt(self: *Cpu, pending_interrupts: u8) void {
     self.IME = false;
 
     // find highest priority interrupt
@@ -99,13 +99,13 @@ fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
 }
 
 /// execute the next instruction (fetch-decode-execute)
-fn execute(self: *CPU) !void {
+fn execute(self: *Cpu) !void {
     self.opcode = self.fetch();
     try self.dispatch_ptr_tbl[(self.opcode >> 6)](self);
 }
 
 // --------------------------------- opcode dispatchers --------------------
-fn dispatch0(self: *CPU) CpuError!void {
+fn dispatch0(self: *Cpu) CpuError!void {
     switch (self.opcode) { // full opcode
         0x00 => self.NOP(),
         0x08 => self.LD_imm16_SP(),
@@ -136,13 +136,13 @@ fn dispatch0(self: *CPU) CpuError!void {
         },
     }
 }
-fn dispatch1(self: *CPU) CpuError!void {
+fn dispatch1(self: *Cpu) CpuError!void {
     switch (self.opcode) { // full opcode
         0x76 => self.HALT(),
         else => self.LD_r8_r8(),
     }
 }
-fn dispatch2(self: *CPU) CpuError!void {
+fn dispatch2(self: *Cpu) CpuError!void {
     switch (self.opcode >> 3) { // upper 5 bits
         0b10000 => self.ADD_A_r8(),
         0b10001 => self.ADC_A_r8(),
@@ -155,7 +155,7 @@ fn dispatch2(self: *CPU) CpuError!void {
         else => unreachable,
     }
 }
-fn dispatch3(self: *CPU) CpuError!void {
+fn dispatch3(self: *Cpu) CpuError!void {
     switch (self.opcode) { // full opcode
         0xC6 => self.ADD_A_imm8(),
         0xCE => self.ADC_A_imm8(),
@@ -183,7 +183,7 @@ fn dispatch3(self: *CPU) CpuError!void {
         0xF3 => self.DI(),
         0xFB => self.EI(),
         // invalid opcodes
-        0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD => return CPU.CpuError.InvalidOpcode,
+        0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD => return Cpu.CpuError.InvalidOpcode,
         else => {
             switch (self.opcode & 0b111) { // lower 3 bits
                 0b000 => self.RET_cond(),
@@ -202,7 +202,7 @@ fn dispatch3(self: *CPU) CpuError!void {
 /// Fetches the opcode at the current PC and increments PC
 /// If the HALT bug is active, the PC is not incremented for this fetch
 /// Cycles: 1
-fn fetch(self: *CPU) u8 {
+fn fetch(self: *Cpu) u8 {
     const opcode = self.bus.read(self.regs.PC);
 
     self.regs.PC +%= 1;
@@ -217,14 +217,14 @@ fn fetch(self: *CPU) u8 {
 }
 
 /// Gets flag from flags register
-fn getFlag(self: *const CPU, flag: Registers.Flag) bool {
+fn getFlag(self: *const Cpu, flag: Registers.Flag) bool {
     const bit: u3 = @intFromEnum(flag);
 
     return ((self.regs.F >> bit) & 0b1) == 1;
 }
 
 /// Sets the flags register
-fn setFlag(self: *CPU, flag: Registers.Flag, value: bool) void {
+fn setFlag(self: *Cpu, flag: Registers.Flag, value: bool) void {
     const bit: u3 = @intFromEnum(flag);
 
     if (value) {
@@ -235,7 +235,7 @@ fn setFlag(self: *CPU, flag: Registers.Flag, value: bool) void {
 }
 
 /// Check a condition code
-fn checkCondition(self: *const CPU, condition: u2) bool {
+fn checkCondition(self: *const Cpu, condition: u2) bool {
     return switch (condition) {
         0 => !self.getFlag(.Z), // NZ
         1 => self.getFlag(.Z), // Z
@@ -246,7 +246,7 @@ fn checkCondition(self: *const CPU, condition: u2) bool {
 
 /// Gets the value of an 8-bit register using an index
 /// Cycles: 1 if register is (HL), 0 otherwise
-fn getR8(self: *const CPU, register: u3) u8 {
+fn getR8(self: *const Cpu, register: u3) u8 {
     return switch (register) {
         0 => self.regs.B,
         1 => self.regs.C,
@@ -264,7 +264,7 @@ fn getR8(self: *const CPU, register: u3) u8 {
 
 /// Sets the value of an 8-bit register using an index
 /// Cycles: 1 if register is (HL), 0 otherwise
-fn setR8(self: *CPU, register: u3, value: u8) void {
+fn setR8(self: *Cpu, register: u3, value: u8) void {
     switch (register) {
         0 => self.regs.B = value,
         1 => self.regs.C = value,
@@ -281,7 +281,7 @@ fn setR8(self: *CPU, register: u3, value: u8) void {
 }
 
 /// Gets the value of a 16-bit register pair using an index
-fn getR16(self: *const CPU, register: u2) u16 {
+fn getR16(self: *const Cpu, register: u2) u16 {
     return switch (register) {
         0 => self.regs.getBC(),
         1 => self.regs.getDE(),
@@ -291,7 +291,7 @@ fn getR16(self: *const CPU, register: u2) u16 {
 }
 
 /// Sets the value of a 16-bit register pair using an index
-fn setR16(self: *CPU, register: u2, value: u16) void {
+fn setR16(self: *Cpu, register: u2, value: u16) void {
     switch (register) {
         0 => self.regs.setBC(value),
         1 => self.regs.setDE(value),
@@ -302,7 +302,7 @@ fn setR16(self: *CPU, register: u2, value: u16) void {
 
 /// Gets the address pointed to by a 16-bit register pair using an index, with
 /// optional increment/decrement for HL.
-fn getR16mem(self: *CPU, register: u2) u16 {
+fn getR16mem(self: *Cpu, register: u2) u16 {
     return switch (register) {
         0, 1 => self.getR16(register), // BC or DE
         2 => { // HLI
@@ -319,7 +319,7 @@ fn getR16mem(self: *CPU, register: u2) u16 {
 }
 
 // Gets the value of a r16stk register index
-fn getR16stk(self: *const CPU, register: u2) u16 {
+fn getR16stk(self: *const Cpu, register: u2) u16 {
     return switch (register) {
         0, 1, 2 => self.getR16(register), // BC, DE, HL
         3 => self.regs.getAF(),
@@ -327,7 +327,7 @@ fn getR16stk(self: *const CPU, register: u2) u16 {
 }
 
 // Sets the value of a r16stk register index
-fn setR16stk(self: *CPU, register: u2, value: u16) void {
+fn setR16stk(self: *Cpu, register: u2, value: u16) void {
     switch (register) {
         0, 1, 2 => self.setR16(register, value),
         3 => self.regs.setAF(value),
@@ -336,13 +336,13 @@ fn setR16stk(self: *CPU, register: u2, value: u16) void {
 
 /// Fetches a 8-bit immediate value from the instruction stream
 /// Cycles: 1
-fn getImm8(self: *CPU, T: type) T {
+fn getImm8(self: *Cpu, T: type) T {
     return @bitCast(self.fetch());
 }
 
 /// Fetches a 16-bit immediate value from the instruction stream
 /// Cycles: 2
-fn getImm16(self: *CPU) u16 {
+fn getImm16(self: *Cpu) u16 {
     const low = self.fetch();
     const high = self.fetch();
     return (@as(u16, high) << 8) | low;
@@ -350,7 +350,7 @@ fn getImm16(self: *CPU) u16 {
 
 /// pop a 16-bit value from the stack
 /// Cycles: 2
-fn pop(self: *CPU) u16 {
+fn pop(self: *Cpu) u16 {
     const low = self.bus.read(self.regs.SP);
     const high = self.bus.read(self.regs.SP +% 1);
     self.regs.SP +%= 2;
@@ -360,7 +360,7 @@ fn pop(self: *CPU) u16 {
 
 /// push a 16-bit value onto the stack
 /// Cycles: 3
-fn push(self: *CPU, value: u16) void {
+fn push(self: *Cpu, value: u16) void {
     self.internalCycle();
     self.regs.SP -%= 2;
     self.bus.write(self.regs.SP +% 1, @intCast(value >> 8));
@@ -369,7 +369,7 @@ fn push(self: *CPU, value: u16) void {
 
 /// calls timer.tick() to advance the timer by 4 T_cycles
 /// Some operations cost cycles without memory access
-fn internalCycle(self: *CPU) void {
+fn internalCycle(self: *Cpu) void {
     self.bus.timer.tick();
 }
 
@@ -381,7 +381,7 @@ fn internalCycle(self: *CPU) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn NOP(self: *const CPU) void {
+fn NOP(self: *const Cpu) void {
     _ = self;
 }
 
@@ -389,7 +389,7 @@ fn NOP(self: *const CPU) void {
 ///
 /// Cycles: 3
 /// Bytes: 3
-fn LD_r16_imm16(self: *CPU) void {
+fn LD_r16_imm16(self: *Cpu) void {
     const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const imm16 = self.getImm16();
 
@@ -401,7 +401,7 @@ fn LD_r16_imm16(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_r16mem_A(self: *CPU) void {
+fn LD_r16mem_A(self: *Cpu) void {
     const r16mem: u2 = @intCast((self.opcode >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
@@ -413,7 +413,7 @@ fn LD_r16mem_A(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_A_r16mem(self: *CPU) void {
+fn LD_A_r16mem(self: *Cpu) void {
     const r16mem: u2 = @intCast((self.opcode >> 4) & 0b11);
     const addr = self.getR16mem(r16mem);
 
@@ -425,7 +425,7 @@ fn LD_A_r16mem(self: *CPU) void {
 ///
 /// Cycles: 5
 /// Bytes: 3
-fn LD_imm16_SP(self: *CPU) void {
+fn LD_imm16_SP(self: *Cpu) void {
     const imm16 = self.getImm16();
     self.bus.write(imm16, @intCast(self.regs.SP & 0xFF));
     self.bus.write(imm16 + 1, @intCast(self.regs.SP >> 8));
@@ -435,7 +435,7 @@ fn LD_imm16_SP(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn INC_r16(self: *CPU) void {
+fn INC_r16(self: *Cpu) void {
     self.internalCycle(); // 16-bit arithmetic takes consumes an M-cycle
     const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const new_val = self.getR16(r16) +% 1;
@@ -447,7 +447,7 @@ fn INC_r16(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn DEC_r16(self: *CPU) void {
+fn DEC_r16(self: *Cpu) void {
     self.internalCycle();
     const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const new_val = self.getR16(r16) -% 1;
@@ -463,7 +463,7 @@ fn DEC_r16(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 11
 ///     C=Set if overflow from bit 15
-fn ADD_HL_r16(self: *CPU) void {
+fn ADD_HL_r16(self: *Cpu) void {
     self.internalCycle();
     const r16: u2 = @intCast((self.opcode >> 4) & 0b11);
     const val = self.getR16(r16);
@@ -485,7 +485,7 @@ fn ADD_HL_r16(self: *CPU) void {
 ///     Z=Set if result is zero
 ///     N=0
 ///     H=Set if overflow from bit 3
-fn INC_r8(self: *CPU) void {
+fn INC_r8(self: *Cpu) void {
     const r8: u3 = @intCast((self.opcode >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val +% 1;
@@ -504,7 +504,7 @@ fn INC_r8(self: *CPU) void {
 ///     Z=Set if result is zero
 ///     N=1
 ///     H=Set if borrow from bit 4
-fn DEC_r8(self: *CPU) void {
+fn DEC_r8(self: *Cpu) void {
     const r8: u3 = @intCast((self.opcode >> 3) & 0b111);
     const val = self.getR8(r8);
     const new_val = val -% 1;
@@ -519,7 +519,7 @@ fn DEC_r8(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 2
-fn LD_r8_imm8(self: *CPU) void {
+fn LD_r8_imm8(self: *Cpu) void {
     const r8: u3 = @intCast((self.opcode >> 3) & 0b111);
     const imm8 = self.getImm8(u8);
 
@@ -535,7 +535,7 @@ fn LD_r8_imm8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of A
-fn RLCA(self: *CPU) void {
+fn RLCA(self: *Cpu) void {
     const carry = self.regs.A >> 7;
 
     self.regs.A = std.math.rotl(u8, self.regs.A, 1);
@@ -554,7 +554,7 @@ fn RLCA(self: *CPU) void {
 ///    N=0
 ///    H=0
 ///    C=Set to old bit 0 of A
-fn RRCA(self: *CPU) void {
+fn RRCA(self: *Cpu) void {
     const carry = self.regs.A & 0b1;
 
     self.regs.A = std.math.rotr(u8, self.regs.A, 1);
@@ -573,7 +573,7 @@ fn RRCA(self: *CPU) void {
 ///    N=0
 ///    H=0
 ///    C=Set to old bit 7 of A
-fn RLA(self: *CPU) void {
+fn RLA(self: *Cpu) void {
     const old_carry = @intFromBool(self.getFlag(.C));
     const new_carry = (self.regs.A >> 7) & 0b1;
 
@@ -593,7 +593,7 @@ fn RLA(self: *CPU) void {
 ///    N=0
 ///    H=0
 ///    C=Set to old bit 0 of A
-fn RRA(self: *CPU) void {
+fn RRA(self: *Cpu) void {
     const old_carry: u8 = @intFromBool(self.getFlag(.C));
     const new_carry = self.regs.A & 0b1;
 
@@ -629,7 +629,7 @@ fn RRA(self: *CPU) void {
 ///     Z=Set if result is zero
 ///     H=0
 ///     C=Set or reset depending to operation
-fn DAA(self: *CPU) void {
+fn DAA(self: *Cpu) void {
     var adjustment: u8 = 0;
     if (self.getFlag(.N)) {
         if (self.getFlag(.H)) {
@@ -661,7 +661,7 @@ fn DAA(self: *CPU) void {
 /// Flags:
 ///     N=1
 ///     H=1
-fn CPL(self: *CPU) void {
+fn CPL(self: *Cpu) void {
     self.regs.A = ~self.regs.A;
 
     self.setFlag(.N, true);
@@ -676,7 +676,7 @@ fn CPL(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=1
-fn SCF(self: *CPU) void {
+fn SCF(self: *Cpu) void {
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, true);
@@ -690,7 +690,7 @@ fn SCF(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Inverted
-fn CCF(self: *CPU) void {
+fn CCF(self: *Cpu) void {
     self.setFlag(.N, false);
     self.setFlag(.H, false);
     self.setFlag(.C, !self.getFlag(.C));
@@ -702,7 +702,7 @@ fn CCF(self: *CPU) void {
 ///
 /// Cycles: 3
 /// Bytes: 2
-fn JR_imm8(self: *CPU) void {
+fn JR_imm8(self: *Cpu) void {
     const offset = self.getImm8(i8);
 
     self.internalCycle();
@@ -721,7 +721,7 @@ fn JR_imm8(self: *CPU) void {
 ///
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
-fn JR_cond_imm8(self: *CPU) void {
+fn JR_cond_imm8(self: *Cpu) void {
     const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
     if (self.checkCondition(cond)) {
         self.JR_imm8();
@@ -735,7 +735,7 @@ fn JR_cond_imm8(self: *CPU) void {
 ///
 /// Cycles: -
 /// Bytes: 2 (depends on emulator state)
-fn STOP(self: *CPU) void {
+fn STOP(self: *Cpu) void {
     const joyp = self.bus.io.getJoyp();
     const key1 = self.bus.io.getKey1();
     const IE = self.bus.IE;
@@ -792,7 +792,7 @@ fn STOP(self: *CPU) void {
 ///
 /// Cycles: 1 or 2 if (HL)
 /// Bytes: 1
-fn LD_r8_r8(self: *CPU) void {
+fn LD_r8_r8(self: *Cpu) void {
     const src: u3 = @intCast(self.opcode & 0b111);
     const dest: u3 = @intCast((self.opcode >> 3) & 0b111);
 
@@ -818,7 +818,7 @@ fn LD_r8_r8(self: *CPU) void {
 ///
 /// Cycles: -
 /// Bytes: 1
-fn HALT(self: *CPU) void {
+fn HALT(self: *Cpu) void {
     if (self.IME) {
         self.halted = true;
     } else {
@@ -844,7 +844,7 @@ fn HALT(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_A_r8(self: *CPU) void {
+fn ADD_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const old_a = self.regs.A;
@@ -865,7 +865,7 @@ fn ADD_A_r8(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADC_A_r8(self: *CPU) void {
+fn ADC_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const carry = @intFromBool(self.getFlag(.C));
@@ -889,7 +889,7 @@ fn ADC_A_r8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
-fn SUB_A_r8(self: *CPU) void {
+fn SUB_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const old_a = self.regs.A;
@@ -911,7 +911,7 @@ fn SUB_A_r8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (r8 + C) > A)
-fn SBC_A_r8(self: *CPU) void {
+fn SBC_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const carry = @intFromBool(self.getFlag(.C));
@@ -936,7 +936,7 @@ fn SBC_A_r8(self: *CPU) void {
 ///     N=0
 ///     H=1
 ///     C=0
-fn AND_A_r8(self: *CPU) void {
+fn AND_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
 
@@ -956,7 +956,7 @@ fn AND_A_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn XOR_A_r8(self: *CPU) void {
+fn XOR_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
 
@@ -976,7 +976,7 @@ fn XOR_A_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn OR_A_r8(self: *CPU) void {
+fn OR_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
 
@@ -998,7 +998,7 @@ fn OR_A_r8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
-fn CP_A_r8(self: *CPU) void {
+fn CP_A_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const value = self.getR8(r8);
     const old_a = self.regs.A;
@@ -1022,7 +1022,7 @@ fn CP_A_r8(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_A_imm8(self: *CPU) void {
+fn ADD_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const old_a = self.regs.A;
 
@@ -1043,7 +1043,7 @@ fn ADD_A_imm8(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADC_A_imm8(self: *CPU) void {
+fn ADC_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const carry = @intFromBool(self.getFlag(.C));
     const old_a = self.regs.A;
@@ -1066,7 +1066,7 @@ fn ADC_A_imm8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if imm8 > A)
-fn SUB_A_imm8(self: *CPU) void {
+fn SUB_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const old_a = self.regs.A;
 
@@ -1087,7 +1087,7 @@ fn SUB_A_imm8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (imm8 + C) > A)
-fn SBC_A_imm8(self: *CPU) void {
+fn SBC_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const carry = @intFromBool(self.getFlag(.C));
     const old_a = self.regs.A;
@@ -1111,7 +1111,7 @@ fn SBC_A_imm8(self: *CPU) void {
 ///     N=0
 ///     H=1
 ///     C=0
-fn AND_A_imm8(self: *CPU) void {
+fn AND_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
 
     self.regs.A = self.regs.A & imm8;
@@ -1130,7 +1130,7 @@ fn AND_A_imm8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn XOR_A_imm8(self: *CPU) void {
+fn XOR_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
 
     self.regs.A = self.regs.A ^ imm8;
@@ -1149,7 +1149,7 @@ fn XOR_A_imm8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn OR_A_imm8(self: *CPU) void {
+fn OR_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     self.regs.A = self.regs.A | imm8;
     self.setFlag(.Z, self.regs.A == 0);
@@ -1168,7 +1168,7 @@ fn OR_A_imm8(self: *CPU) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if imm8 > A)
-fn CP_A_imm8(self: *CPU) void {
+fn CP_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const old_a = self.regs.A;
 
@@ -1183,7 +1183,7 @@ fn CP_A_imm8(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RET(self: *CPU) void {
+fn RET(self: *Cpu) void {
     const target = self.pop();
     self.internalCycle();
     self.regs.PC = target;
@@ -1193,7 +1193,7 @@ fn RET(self: *CPU) void {
 ///
 /// Cycles: 5 taken / 2 untaken
 /// Bytes: 1
-fn RET_cond(self: *CPU) void {
+fn RET_cond(self: *Cpu) void {
     const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
 
     self.internalCycle(); // decision cycle
@@ -1208,7 +1208,7 @@ fn RET_cond(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RETI(self: *CPU) void {
+fn RETI(self: *Cpu) void {
     self.RET();
     self.IME = true;
 }
@@ -1217,7 +1217,7 @@ fn RETI(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 3
-fn JP_imm16(self: *CPU) void {
+fn JP_imm16(self: *Cpu) void {
     const target = self.getImm16();
 
     self.internalCycle();
@@ -1229,7 +1229,7 @@ fn JP_imm16(self: *CPU) void {
 ///
 /// Cycles: 4 taken / 3 untaken
 /// Bytes: 3
-fn JP_cond_imm16(self: *CPU) void {
+fn JP_cond_imm16(self: *Cpu) void {
     const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
 
     if (self.checkCondition(cond)) {
@@ -1243,7 +1243,7 @@ fn JP_cond_imm16(self: *CPU) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn JP_HL(self: *CPU) void {
+fn JP_HL(self: *Cpu) void {
     self.regs.PC = self.regs.getHL();
 }
 
@@ -1253,7 +1253,7 @@ fn JP_HL(self: *CPU) void {
 ///
 /// Cycles: 6
 /// Bytes: 3
-fn CALL_imm16(self: *CPU) void {
+fn CALL_imm16(self: *Cpu) void {
     const target = self.getImm16();
 
     self.push(self.regs.PC);
@@ -1265,7 +1265,7 @@ fn CALL_imm16(self: *CPU) void {
 ///
 /// Cycles: 6 taken / 3 untaken
 /// Bytes: 3
-fn CALL_cond_imm16(self: *CPU) void {
+fn CALL_cond_imm16(self: *Cpu) void {
     const cond: u2 = @intCast((self.opcode >> 3) & 0b11);
 
     if (self.checkCondition(cond)) {
@@ -1279,7 +1279,7 @@ fn CALL_cond_imm16(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn RST_tgt3(self: *CPU) void {
+fn RST_tgt3(self: *Cpu) void {
     const tgt3 = (self.opcode >> 3) & 0b111;
 
     self.push(self.regs.PC);
@@ -1290,7 +1290,7 @@ fn RST_tgt3(self: *CPU) void {
 ///
 /// Cycles: 3
 /// Bytes: 1
-fn POP_r16stk(self: *CPU) void {
+fn POP_r16stk(self: *Cpu) void {
     const value = self.pop();
     const r16stk: u2 = @intCast((self.opcode >> 4) & 0b11);
 
@@ -1301,7 +1301,7 @@ fn POP_r16stk(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 1
-fn PUSH_r16stk(self: *CPU) void {
+fn PUSH_r16stk(self: *Cpu) void {
     const r16stk: u2 = @intCast((self.opcode >> 4) & 0b11);
     const value = self.getR16stk(r16stk);
 
@@ -1313,7 +1313,7 @@ fn PUSH_r16stk(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LDH_C_A(self: CPU) void {
+fn LDH_C_A(self: Cpu) void {
     const address = 0xFF00 + @as(u16, self.regs.C);
 
     self.bus.write(address, self.regs.A);
@@ -1325,7 +1325,7 @@ fn LDH_C_A(self: CPU) void {
 ///
 /// Cycles: 3
 /// Bytes: 2
-fn LDH_imm8_A(self: *CPU) void {
+fn LDH_imm8_A(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const address = 0xFF00 + @as(u16, imm8);
 
@@ -1337,7 +1337,7 @@ fn LDH_imm8_A(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 3
-fn LD_imm16_A(self: *CPU) void {
+fn LD_imm16_A(self: *Cpu) void {
     const address = self.getImm16();
 
     self.bus.write(address, self.regs.A);
@@ -1347,7 +1347,7 @@ fn LD_imm16_A(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LDH_A_C(self: *CPU) void {
+fn LDH_A_C(self: *Cpu) void {
     const address = 0xFF00 + @as(u16, self.regs.C);
 
     self.regs.A = self.bus.read(address);
@@ -1359,7 +1359,7 @@ fn LDH_A_C(self: *CPU) void {
 ///
 /// Cycles: 3
 /// Bytes: 2
-fn LDH_A_imm8(self: *CPU) void {
+fn LDH_A_imm8(self: *Cpu) void {
     const imm8 = self.getImm8(u8);
     const address = 0xFF00 + @as(u16, imm8);
 
@@ -1370,7 +1370,7 @@ fn LDH_A_imm8(self: *CPU) void {
 ///
 /// Cycles: 4
 /// Bytes: 3
-fn LD_A_imm16(self: *CPU) void {
+fn LD_A_imm16(self: *Cpu) void {
     const address = self.getImm16();
 
     self.regs.A = self.bus.read(address);
@@ -1385,7 +1385,7 @@ fn LD_A_imm16(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn ADD_SP_imm8(self: *CPU) void {
+fn ADD_SP_imm8(self: *Cpu) void {
     const offset = self.getImm8(i8);
     const old_sp = self.regs.SP;
     const offset_bits: u8 = @bitCast(offset);
@@ -1416,7 +1416,7 @@ fn ADD_SP_imm8(self: *CPU) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
-fn LD_HL_SPimm8(self: *CPU) void {
+fn LD_HL_SPimm8(self: *Cpu) void {
     const offset = self.getImm8(i8);
     const old_sp = self.regs.SP;
     const offset_bits: u8 = @bitCast(offset);
@@ -1440,7 +1440,7 @@ fn LD_HL_SPimm8(self: *CPU) void {
 ///
 /// Cycles: 2
 /// Bytes: 1
-fn LD_SP_HL(self: *CPU) void {
+fn LD_SP_HL(self: *Cpu) void {
     self.internalCycle();
     self.regs.SP = self.regs.getHL();
 }
@@ -1450,7 +1450,7 @@ fn LD_SP_HL(self: *CPU) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn EI(self: *CPU) void {
+fn EI(self: *Cpu) void {
     self.IME_scheduled = true;
 }
 
@@ -1458,7 +1458,7 @@ fn EI(self: *CPU) void {
 ///
 /// Cycles: 1
 /// Bytes: 1
-fn DI(self: *CPU) void {
+fn DI(self: *Cpu) void {
     self.IME = false;
 }
 
@@ -1474,7 +1474,7 @@ fn DI(self: *CPU) void {
 
 /// $CB prefix. The next executed instruction is from the $CB bank portion of
 /// the decode ROM. $CB prefix opcodes behave like two-byte opcodes
-fn CB_prefix(self: *CPU) void {
+fn CB_prefix(self: *Cpu) void {
     self.opcode = self.fetch();
 
     switch (self.opcode >> 6) {
@@ -1506,7 +1506,7 @@ fn CB_prefix(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn RLC_r8(self: *CPU) void {
+fn RLC_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const carry = value >> 7;
@@ -1529,7 +1529,7 @@ fn RLC_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn RRC_r8(self: *CPU) void {
+fn RRC_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const carry = value & 0b1;
@@ -1552,7 +1552,7 @@ fn RRC_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn RL_r8(self: *CPU) void {
+fn RL_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const old_carry = @intFromBool(self.getFlag(.C));
@@ -1576,7 +1576,7 @@ fn RL_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn RR_r8(self: *CPU) void {
+fn RR_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const old_carry: u8 = @intFromBool(self.getFlag(.C));
@@ -1601,7 +1601,7 @@ fn RR_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 7 of r8
-fn SLA_r8(self: *CPU) void {
+fn SLA_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const carry = value >> 7;
@@ -1625,7 +1625,7 @@ fn SLA_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn SRA_r8(self: *CPU) void {
+fn SRA_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const carry = value & 0b1;
@@ -1650,7 +1650,7 @@ fn SRA_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=0
-fn SWAP_r8(self: *CPU) void {
+fn SWAP_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const high = value >> 4;
@@ -1675,7 +1675,7 @@ fn SWAP_r8(self: *CPU) void {
 ///     N=0
 ///     H=0
 ///     C=Set to old bit 0 of r8
-fn SRL_r8(self: *CPU) void {
+fn SRL_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     var value = self.getR8(r8);
     const carry = value & 0b1;
@@ -1698,7 +1698,7 @@ fn SRL_r8(self: *CPU) void {
 ///     Z=Set if bit b3 is 0
 ///     N=0
 ///     H=1
-fn BIT_b3_r8(self: *CPU) void {
+fn BIT_b3_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const b3: u3 = @intCast((self.opcode >> 3) & 0b111);
     const value = self.getR8(r8);
@@ -1715,7 +1715,7 @@ fn BIT_b3_r8(self: *CPU) void {
 ///
 /// Cycles: 2 or 4 if (HL)
 /// Bytes: 2
-fn RES_b3_r8(self: *CPU) void {
+fn RES_b3_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const b3: u3 = @intCast((self.opcode >> 3) & 0b111);
     var value = self.getR8(r8);
@@ -1730,7 +1730,7 @@ fn RES_b3_r8(self: *CPU) void {
 ///
 /// Cycles: 2 or 4 if (HL)
 /// Bytes: 2
-fn SET_b3_r8(self: *CPU) void {
+fn SET_b3_r8(self: *Cpu) void {
     const r8: u3 = @intCast(self.opcode & 0b111);
     const b3: u3 = @intCast((self.opcode >> 3) & 0b111);
     var value = self.getR8(r8);
@@ -1744,7 +1744,7 @@ const Timer = @import("Timer.zig");
 test "NOP" {
     // setup fake RAM
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     try cpu.step();
@@ -1754,7 +1754,7 @@ test "NOP" {
 
 test "LD_r16_imm16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b00000001; // Opcode for LD BC, imm16
@@ -1777,7 +1777,7 @@ test "LD_r16_imm16" {
 
 test "LD_r16mem_A" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0xAB; // A register
@@ -1812,7 +1812,7 @@ test "LD_r16mem_A" {
 
 test "LD_A_r16mem" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0x3412] = 0xCD;
@@ -1827,7 +1827,7 @@ test "LD_A_r16mem" {
 
 test "LD_imm16_SP" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.SP = 0x9ABC;
@@ -1843,7 +1843,7 @@ test "LD_imm16_SP" {
 
 test "INC_r16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0xFF; // B register
@@ -1865,7 +1865,7 @@ test "INC_r16" {
 
 test "DEC_r16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0x00; // B register
@@ -1887,7 +1887,7 @@ test "DEC_r16" {
 
 test "ADD_HL_r16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.H = 0x1F; // H register
@@ -1918,7 +1918,7 @@ test "ADD_HL_r16" {
 
 test "INC_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0xFF; // A register
@@ -1932,7 +1932,7 @@ test "INC_r8" {
 
 test "DEC_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x00; // A register
@@ -1946,7 +1946,7 @@ test "DEC_r8" {
 
 test "LD_r8_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b00000110; // Opcode for LD B, imm8
@@ -1959,7 +1959,7 @@ test "LD_r8_imm8" {
 
 test "RLCA" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b10000001; // A register
@@ -1973,7 +1973,7 @@ test "RLCA" {
 
 test "RRCA" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b00000011; // A register
@@ -1987,7 +1987,7 @@ test "RRCA" {
 
 test "RLA" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b10000001; // A register
@@ -2002,7 +2002,7 @@ test "RLA" {
 
 test "RRA" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b00000011; // A register
@@ -2017,7 +2017,7 @@ test "RRA" {
 
 test "DAA" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x98; // A register
@@ -2041,7 +2041,7 @@ test "DAA" {
 
 test "CPL" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b10101010; // A register
@@ -2055,7 +2055,7 @@ test "CPL" {
 
 test "SCF" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.F = 0b00000000; // Clear all flags
@@ -2068,7 +2068,7 @@ test "SCF" {
 
 test "CCF" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.F = 0b00010000; // Set Carry flag
@@ -2087,7 +2087,7 @@ test "CCF" {
 
 test "JR_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b00011000; // Opcode for JR imm8
@@ -2104,7 +2104,7 @@ test "JR_imm8" {
 
 test "JR_cond_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b00100000; // Opcode for JR NZ, imm8
@@ -2134,7 +2134,7 @@ test "JR_cond_imm8" {
 
 test "LD_r8_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0x56;
@@ -2163,7 +2163,7 @@ test "LD_r8_r8" {
 
 test "HALT" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b01110110; // Opcode for HALT
@@ -2175,7 +2175,7 @@ test "HALT" {
 
 test "ADD_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x14;
@@ -2200,7 +2200,7 @@ test "ADD_A_r8" {
 
 test "ADC_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x14;
@@ -2225,7 +2225,7 @@ test "ADC_A_r8" {
 
 test "SUB_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x50;
@@ -2248,7 +2248,7 @@ test "SUB_A_r8" {
 
 test "SBC_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x50;
@@ -2272,7 +2272,7 @@ test "SBC_A_r8" {
 
 test "AND_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b11001100;
@@ -2287,7 +2287,7 @@ test "AND_A_r8" {
 
 test "XOR_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b11001100;
@@ -2302,7 +2302,7 @@ test "XOR_A_r8" {
 
 test "OR_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b11001100;
@@ -2317,7 +2317,7 @@ test "OR_A_r8" {
 
 test "CP_A_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x50;
@@ -2340,7 +2340,7 @@ test "CP_A_r8" {
 
 test "ADD_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x10;
@@ -2363,7 +2363,7 @@ test "ADD_A_imm8" {
 
 test "ADC_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x10;
@@ -2388,7 +2388,7 @@ test "ADC_A_imm8" {
 
 test "SUB_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x50;
@@ -2411,7 +2411,7 @@ test "SUB_A_imm8" {
 
 test "SBC_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x50;
@@ -2435,7 +2435,7 @@ test "SBC_A_imm8" {
 
 test "AND_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b11001100;
@@ -2450,7 +2450,7 @@ test "AND_A_imm8" {
 
 test "XOR_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b11001100;
@@ -2465,7 +2465,7 @@ test "XOR_A_imm8" {
 
 test "OR_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0b11001100;
@@ -2480,7 +2480,7 @@ test "OR_A_imm8" {
 
 test "CP_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x50;
@@ -2503,7 +2503,7 @@ test "CP_A_imm8" {
 
 test "RET" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2519,7 +2519,7 @@ test "RET" {
 
 test "RET_cond" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2547,7 +2547,7 @@ test "RET_cond" {
 
 test "RETI" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2564,7 +2564,7 @@ test "RETI" {
 
 test "JP_imm16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b11000011; // Opcode for JP imm16
@@ -2577,7 +2577,7 @@ test "JP_imm16" {
 
 test "JP_cond_imm16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b11000010; // Opcode for JP NZ, imm16
@@ -2599,7 +2599,7 @@ test "JP_cond_imm16" {
 
 test "JP_HL" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.H = 0x12; // H register
@@ -2612,7 +2612,7 @@ test "JP_HL" {
 
 test "CALL_imm16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2631,7 +2631,7 @@ test "CALL_imm16" {
 
 test "CALL_cond_imm16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2661,7 +2661,7 @@ test "CALL_cond_imm16" {
 
 test "RST_tgt3" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2677,7 +2677,7 @@ test "RST_tgt3" {
 
 test "POP_r16stk" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     // Prepare stack
@@ -2693,7 +2693,7 @@ test "POP_r16stk" {
 
 test "PUSH_r16stk" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.setR16(0, 0x1234); // BC register
@@ -2708,7 +2708,7 @@ test "PUSH_r16stk" {
 
 test "LDH_C_A" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.C = 0x80; // C register
@@ -2722,7 +2722,7 @@ test "LDH_C_A" {
 
 test "LDH_imm8_A" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x37; // A register
@@ -2736,7 +2736,7 @@ test "LDH_imm8_A" {
 
 test "LD_imm16_A" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.A = 0x55; // A register
@@ -2751,7 +2751,7 @@ test "LD_imm16_A" {
 
 test "LDH_A_C" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.HRAM[0] = 0x7A; // Memory at address FF20
@@ -2765,7 +2765,7 @@ test "LDH_A_C" {
 
 test "LDH_A_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.HRAM[0] = 0x8B; // Memory at address FF30
@@ -2779,7 +2779,7 @@ test "LDH_A_imm8" {
 
 test "LD_A_imm16" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0x00C1] = 0x9C; // Memory at address C100
@@ -2794,7 +2794,7 @@ test "LD_A_imm16" {
 
 test "ADD_SP_imm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.SP = 0xFFF8;
@@ -2817,7 +2817,7 @@ test "ADD_SP_imm8" {
 
 test "LD_HL_SPimm8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.SP = 0xFFF8;
@@ -2843,7 +2843,7 @@ test "LD_HL_SPimm8" {
 
 test "LD_SP_HL" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.H = 0x12; // H register
@@ -2857,7 +2857,7 @@ test "LD_SP_HL" {
 
 test "EI" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.ROM_0[0] = 0b11111011; // Opcode for EI
@@ -2876,7 +2876,7 @@ test "EI" {
 
 test "DI" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.IME = true;
@@ -2889,7 +2889,7 @@ test "DI" {
 
 test "OpcodeHole" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     bus.write(0, 0xD3); // Invalid Opcode
@@ -2919,7 +2919,7 @@ test "OpcodeHole" {
 // ------------------------ CB prefix tests ----------------------
 test "RLC_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -2943,7 +2943,7 @@ test "RLC_r8" {
 
 test "RRC_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -2967,7 +2967,7 @@ test "RRC_r8" {
 
 test "RL_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -2993,7 +2993,7 @@ test "RL_r8" {
 
 test "RR_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -3019,7 +3019,7 @@ test "RR_r8" {
 
 test "SLA_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -3043,7 +3043,7 @@ test "SLA_r8" {
 
 test "SRA_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -3067,7 +3067,7 @@ test "SRA_r8" {
 
 test "SWAP_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10110001; // B register
@@ -3091,7 +3091,7 @@ test "SWAP_r8" {
 
 test "SRL_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b10000001; // B register
@@ -3115,7 +3115,7 @@ test "SRL_r8" {
 
 test "BIT_b3_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b00001000; // B register
@@ -3138,7 +3138,7 @@ test "BIT_b3_r8" {
 
 test "RES_b3_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b11111111; // B register
@@ -3160,7 +3160,7 @@ test "RES_b3_r8" {
 
 test "SET_b3_r8" {
     var bus = Bus.init();
-    var cpu = CPU.init(&bus);
+    var cpu = Cpu.init(&bus);
     var timer = Timer.init(&bus);
     bus.timer = &timer;
     cpu.regs.B = 0b00000000; // B register

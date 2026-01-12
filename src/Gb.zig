@@ -1,28 +1,28 @@
-const GB = @This();
+const Gb = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const CPU = @import("CPU.zig");
+const Cpu = @import("Cpu.zig");
 const Bus = @import("Bus.zig");
 const Timer = @import("Timer.zig");
-const IO = @import("IO.zig");
+const Io = @import("Io.zig");
 
-cpu: CPU,
+cpu: Cpu,
 timer: Timer,
-io: IO,
+io: Io,
 bus: Bus, // memory-mapped I/O
 screen: [160 * 144]u8 = @splat(0), // 160x144 pixels
 
-pub fn init(allocator: Allocator, rom: []const u8) !*GB {
+pub fn init(allocator: Allocator, rom: []const u8) !*Gb {
     // put GB instance on heap so self-references work
-    const gb = try allocator.create(GB);
+    const gb = try allocator.create(Gb);
     errdefer allocator.destroy(gb);
 
     // init modules
     gb.bus = Bus.init();
-    gb.cpu = CPU.init(&gb.bus);
+    gb.cpu = Cpu.init(&gb.bus);
     gb.timer = Timer.init(&gb.bus);
-    gb.io = IO.init(&gb.bus);
+    gb.io = Io.init(&gb.bus);
 
     // connect modules to bus
     gb.bus.timer = &gb.timer;
@@ -41,12 +41,12 @@ pub fn init(allocator: Allocator, rom: []const u8) !*GB {
     return gb;
 }
 
-pub fn deinit(self: *GB, allocator: Allocator) void {
+pub fn deinit(self: *Gb, allocator: Allocator) void {
     allocator.free(self.bus.ROM);
     allocator.destroy(self);
 }
 
-fn load_rom(self: *GB, allocator: Allocator, rom_file: []const u8) !void {
+fn load_rom(self: *Gb, allocator: Allocator, rom_file: []const u8) !void {
     const file = try std.fs.cwd().openFile(rom_file, .{ .mode = .read_only });
     defer file.close();
     var buffer: [0x4000]u8 = undefined;
@@ -60,13 +60,13 @@ fn load_rom(self: *GB, allocator: Allocator, rom_file: []const u8) !void {
     self.bus.insertROM(rom);
 }
 
-pub fn run(self: *GB) void {
+pub fn run(self: *Gb) void {
     while (true) {
         self.step();
     }
 }
 
-pub fn step(self: *GB) void {
+pub fn step(self: *Gb) void {
     self.cpu.step() catch {
         const opcode = self.bus.read(self.cpu.regs.PC - 1);
         std.debug.print("CRASH: Attempted to execute invalid opcode: ${X} at PC: ${X}\n", .{ opcode, self.cpu.regs.PC - 1 });

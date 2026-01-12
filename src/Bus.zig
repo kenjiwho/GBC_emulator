@@ -3,13 +3,13 @@
 const Bus = @This();
 
 const Timer = @import("Timer.zig");
-const MBC = @import("MBC.zig").MBC;
-const IO = @import("IO.zig");
+const Mbc = @import("Mbc.zig").Mbc;
+const Io = @import("Io.zig");
 
 // Memory Map
 ROM: []const u8 = undefined, // 16KiB ROM bank 00 (0000-3FFF) + switchable bank 01-NN (4000-7FFF)
 VRAM: [0x2000]u8 = @splat(0), // 8KiB Video RAM (GBC mode: switchable 0/1): 8000-9FFF
-ExternalRAM: [0x8000]u8 = @splat(0), // 8KiB External RAM (possibly switchable 00-03): A000-BFFF
+external_RAM: [0x8000]u8 = @splat(0), // 8KiB External RAM (possibly switchable 00-03): A000-BFFF
 WRAM_0: [0x1000]u8 = @splat(0), // 4KiB Work RAM Bank 0: C000-CFFF
 WRAM_S: [0x1000]u8 = @splat(0), // 4KiB Work RAM (GBC mode: switchable 1-7): D000-DFFF
 // EchoRAM: Echo of C000-DDFF: E000-FDFF (typically not used)
@@ -21,8 +21,8 @@ IE: u8 = 0, // Interrupt Enable Register: FFFF
 
 // Modules
 timer: *Timer = undefined,
-io: *IO = undefined,
-mbc: MBC = undefined,
+io: *Io = undefined,
+mbc: Mbc = undefined,
 
 pub fn init() Bus {
     return Bus{};
@@ -34,7 +34,7 @@ pub fn insertROM(self: *Bus, rom: []const u8) void {
     // setup mbc based on rom header
     const cartridge_type = rom[0x147];
     const rom_size_code = rom[0x148];
-    self.mbc = MBC.init(cartridge_type, rom_size_code);
+    self.mbc = Mbc.init(cartridge_type, rom_size_code);
 }
 
 pub fn read(self: *const Bus, address: u16) u8 {
@@ -44,7 +44,7 @@ pub fn read(self: *const Bus, address: u16) u8 {
         0x0000...0x3FFF => self.ROM[address],
         0x4000...0x7FFF => self.ROM[self.mbc.mapROMAddress(address)],
         0x8000...0x9FFF => self.VRAM[address - 0x8000],
-        0xA000...0xBFFF => if (self.mbc.ExternalRAM_enabled()) self.ExternalRAM[address - 0xA000] else 0xFF,
+        0xA000...0xBFFF => if (self.mbc.ExternalRAM_enabled()) self.external_RAM[address - 0xA000] else 0xFF,
         0xC000...0xCFFF => self.WRAM_0[address - 0xC000],
         0xD000...0xDFFF => self.WRAM_S[address - 0xD000],
         0xE000...0xEFFF => self.WRAM_0[address - 0xE000], // Echo RAM
@@ -68,7 +68,7 @@ pub fn write(self: *Bus, address: u16, value: u8) void {
         0x8000...0x9FFF => self.VRAM[address - 0x8000] = value,
         0xA000...0xBFFF => {
             if (self.mbc.ExternalRAM_enabled()) {
-                self.ExternalRAM[self.mbc.mapRAMAddress(address)] = value;
+                self.external_RAM[self.mbc.mapRAMAddress(address)] = value;
             }
         },
         0xC000...0xCFFF => self.WRAM_0[address - 0xC000] = value,
