@@ -27,5 +27,5 @@ pub fn main() !void {
 }
 
 test {
-    _ = @import("Cpu.zig");
+    _ = @import("tests/test_instrs.zig");
 }
