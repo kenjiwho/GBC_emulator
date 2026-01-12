@@ -57,12 +57,6 @@ fn load_rom(self: *GB, allocator: Allocator, rom_file: []const u8) !void {
 }
 
 pub fn run(self: *GB) void {
-    // ----------------------- USED IN BLARGG TESTING -----------------------
-    self.cpu.logState() catch {
-        std.debug.print("CRASH: Failed to log CPU state at PC: ${X}\n", .{self.cpu.regs.PC});
-        std.process.exit(1);
-    };
-    // ----------------------------------------------------------------------
     while (true) {
         self.step();
     }

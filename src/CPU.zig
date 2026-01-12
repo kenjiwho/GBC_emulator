@@ -13,6 +13,8 @@ regs: Registers = Registers.init(), // 8x8-bit registers or 4x16-bit registers (
 IME: bool = false,
 IME_scheduled: bool = false, // whether to enable IME after next instruction
 halted: bool = false,
+halted_timer: i19 = -1,
+stopped: bool = false,
 HALT_bug: bool = false, // whether the HALT bug should be simulated
 bus: *Bus, // reference to the bus struct so instructions can interact with memory
 comptime dispatch_ptr_tbl: [4]DispatchFn = .{
@@ -36,12 +38,24 @@ pub fn step(self: *CPU) !void {
     const IF = self.bus.getIF();
     const pending_interrupts = IE & IF;
 
+    // handle STOP state
+    if (self.stopped) {
+        std.debug.print("STOPPED\n", .{});
+        return;
+    }
+
     // handle HALT state
     if (self.halted) {
         if (pending_interrupts != 0) {
             self.halted = false;
+        } else if (self.halted_timer == 0) {
+            self.halted = false;
+            self.halted_timer = -1;
         } else {
             self.internalCycle(); // advance timer while halted
+            if (self.halted_timer > 0) {
+                self.halted_timer -= 4;
+            }
             return;
         }
     }
@@ -54,44 +68,12 @@ pub fn step(self: *CPU) !void {
     const next_IME = self.IME_scheduled;
 
     try self.execute();
-    // ----------------------- USED IN BLARGG TESTING -----------------------
-    try self.logState();
-    // ----------------------------------------------------------------------
 
     if (next_IME) {
         self.IME = true;
         self.IME_scheduled = false;
     }
 }
-
-// ----------------------- USED IN BLARGG TESTING -----------------------
-pub fn logState(self: *const CPU) !void {
-    const cwd = std.fs.cwd();
-    const file = try cwd.createFile("./blargg.log", .{ .truncate = false });
-    defer file.close();
-    var buffer: [256]u8 = undefined;
-    try file.seekFromEnd(0);
-
-    const state = try std.fmt.bufPrint(&buffer, "A:{X:02} F:{X:02} B:{X:02} C:{X:02} D:{X:02} E:{X:02} H:{X:02} L:{X:02} SP:{X:04} PC:{X:04} PCMEM:{X:02},{X:02},{X:02},{X:02}\n", .{
-        self.regs.A,
-        self.regs.F,
-        self.regs.B,
-        self.regs.C,
-        self.regs.D,
-        self.regs.E,
-        self.regs.H,
-        self.regs.L,
-        self.regs.SP,
-        self.regs.PC,
-        self.bus.read_no_tick(self.regs.PC),
-        self.bus.read_no_tick(self.regs.PC + 1),
-        self.bus.read_no_tick(self.regs.PC + 2),
-        self.bus.read_no_tick(self.regs.PC + 3),
-    });
-
-    _ = try file.write(state);
-}
-// ----------------------------------------------------------------------
 
 /// service an interrupt
 /// Cycles: 5
@@ -753,9 +735,52 @@ fn JR_cond_imm8(self: *CPU) void {
 ///
 /// Cycles: -
 /// Bytes: 2 (depends on emulator state)
-fn STOP(self: *const CPU) void {
-    _ = self;
-    @panic("not implemented");
+fn STOP(self: *CPU) void {
+    const joyp = self.bus.getJoyp();
+    const key1 = self.bus.getKey1();
+    const IE = self.bus.getIE();
+    const IF = self.bus.getIF();
+    const pending_interrupts = IE & IF;
+
+    if ((joyp & 0x0F) != 0x0F) { // button pressed
+        if (pending_interrupts != 0) {
+            // 1-byte opcode no STOP
+            return;
+        }
+        // 2-byte opcode HALT
+        _ = self.getImm8(u8);
+        self.halted = true;
+        return;
+    }
+
+    if ((key1 & 0b1) == 0) { // speed switch not requested
+        if (pending_interrupts != 0) {
+            // 1-byte opcode STOP
+            self.bus.timer.write(0xFF04, 0x00); // reset DIV
+            self.stopped = true;
+            return;
+        }
+        // 2-byte opcode STOP
+        _ = self.getImm8(u8);
+        self.bus.timer.write(0xFF04, 0x00); // reset DIV
+        self.stopped = true;
+        return;
+    }
+
+    if (pending_interrupts != 0) {
+        if (self.IME) {
+            self.bus.timer.write(0xFF04, 0x00); // reset DIV
+            self.bus.toggleSpeed(); // set double speed
+            return;
+        }
+        @panic("STOP bug: non-deterministic behavior");
+    }
+
+    _ = self.getImm8(u8);
+    self.bus.timer.write(0xFF04, 0x00); // reset DIV
+    self.halted = true;
+    self.halted_timer = 0x20000; // halted should last 0x20000 T-cycles
+    self.bus.toggleSpeed();
 }
 
 // ------------------------------- end block 0 --------------------------------
