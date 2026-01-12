@@ -34,8 +34,8 @@ pub fn init(bus: *Bus) CPU {
 
 /// perform a single CPU step with IME, HALT, and interrupt handling
 pub fn step(self: *CPU) !void {
-    const IE = self.bus.getIE();
-    const IF = self.bus.getIF();
+    const IE = self.bus.IE;
+    const IF = self.bus.io.getIF();
     const pending_interrupts = IE & IF;
 
     // handle STOP state
@@ -87,9 +87,9 @@ fn serviceInterrupt(self: *CPU, pending_interrupts: u8) void {
     const interrupt_vector = 0x40 + @as(u8, interrupt_num) * 0x08;
 
     // clear current handled interrupt flag
-    const IF = self.bus.getIF();
+    const IF = self.bus.io.getIF();
     const bit_mask = @as(u8, 1) << interrupt_num;
-    self.bus.setIF(IF & ~bit_mask);
+    self.bus.io.setIF(IF & ~bit_mask);
 
     // jump to interrupt handler
     self.internalCycle();
@@ -736,10 +736,10 @@ fn JR_cond_imm8(self: *CPU) void {
 /// Cycles: -
 /// Bytes: 2 (depends on emulator state)
 fn STOP(self: *CPU) void {
-    const joyp = self.bus.getJoyp();
-    const key1 = self.bus.getKey1();
-    const IE = self.bus.getIE();
-    const IF = self.bus.getIF();
+    const joyp = self.bus.io.getJoyp();
+    const key1 = self.bus.io.getKey1();
+    const IE = self.bus.IE;
+    const IF = self.bus.io.getIF();
     const pending_interrupts = IE & IF;
 
     if ((joyp & 0x0F) != 0x0F) { // button pressed
@@ -770,7 +770,7 @@ fn STOP(self: *CPU) void {
     if (pending_interrupts != 0) {
         if (self.IME) {
             self.bus.timer.write(0xFF04, 0x00); // reset DIV
-            self.bus.toggleSpeed(); // set double speed
+            self.bus.io.toggleSpeed(); // set double speed
             return;
         }
         @panic("STOP bug: non-deterministic behavior");
@@ -780,7 +780,7 @@ fn STOP(self: *CPU) void {
     self.bus.timer.write(0xFF04, 0x00); // reset DIV
     self.halted = true;
     self.halted_timer = 0x20000; // halted should last 0x20000 T-cycles
-    self.bus.toggleSpeed();
+    self.bus.io.toggleSpeed();
 }
 
 // ------------------------------- end block 0 --------------------------------
@@ -822,8 +822,8 @@ fn HALT(self: *CPU) void {
     if (self.IME) {
         self.halted = true;
     } else {
-        const IE = self.bus.getIE();
-        const IF = self.bus.getIF();
+        const IE = self.bus.IE;
+        const IF = self.bus.io.getIF();
         if ((IE & IF) == 0) {
             self.halted = true;
         } else {

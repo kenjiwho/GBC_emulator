@@ -23,7 +23,7 @@ pub fn tick(self: *Timer) void {
             self.reload_delay -= 1;
             if (self.reload_delay == 0) {
                 self.TIMA = self.TMA;
-                self.bus.requestInterrupt(.Timer);
+                self.bus.io.requestInterrupt(.Timer);
             }
         }
 

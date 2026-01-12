@@ -5,9 +5,11 @@ const Allocator = std.mem.Allocator;
 const CPU = @import("CPU.zig");
 const Bus = @import("Bus.zig");
 const Timer = @import("Timer.zig");
+const IO = @import("IO.zig");
 
 cpu: CPU,
 timer: Timer,
+io: IO,
 bus: Bus, // memory-mapped I/O
 screen: [160 * 144]u8 = @splat(0), // 160x144 pixels
 
@@ -20,9 +22,11 @@ pub fn init(allocator: Allocator, rom: []const u8) !*GB {
     gb.bus = Bus.init();
     gb.cpu = CPU.init(&gb.bus);
     gb.timer = Timer.init(&gb.bus);
+    gb.io = IO.init(&gb.bus);
 
     // connect modules to bus
     gb.bus.timer = &gb.timer;
+    gb.bus.io = &gb.io;
 
     // ---------------------- USED IN BLARGG TESTING ----------------------
     try gb.load_rom(allocator, rom);
