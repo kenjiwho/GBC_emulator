@@ -1,16 +1,13 @@
 const std = @import("std");
-const GB = @import("GB.zig");
+const Gb = @import("Gb.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var gb = try GB.init(allocator);
-    defer gb.deinit(allocator);
-
-    // ---------------------- USED IN BLARGG TESTING ----------------------
-    try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/01-special.gb");
+    // try gb.load_rom("./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
+    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/01-special.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/02-interrupts.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/03-op sp,hl.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/04-op r,imm.gb");
@@ -21,17 +18,14 @@ pub fn main() !void {
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/09-op r,r.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/10-bit ops.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
+    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/halt_bug.gb");
-    gb.cpu.regs.PC = 0x0100;
-    gb.cpu.regs.setAF(0x01B0);
-    gb.cpu.regs.setBC(0x0013);
-    gb.cpu.regs.setDE(0x00D8);
-    gb.cpu.regs.setHL(0x014D);
-    gb.cpu.regs.SP = 0xFFFE;
-    // --------------------------------------------------------------------
+    var gb = try Gb.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
+    defer gb.deinit(allocator);
+
     gb.run();
 }
 
 test {
-    _ = @import("CPU.zig");
+    _ = @import("tests/test_instrs.zig");
 }
