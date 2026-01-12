@@ -1,4 +1,4 @@
-const std = @import("std");
+const math = @import("std").math;
 const Cpu = @import("Cpu.zig");
 const Registers = @import("Registers.zig");
 
@@ -274,7 +274,7 @@ fn LD_r8_imm8(cpu: *Cpu) void {
 fn RLCA(cpu: *Cpu) void {
     const carry = cpu.regs.A >> 7;
 
-    cpu.regs.A = std.math.rotl(u8, cpu.regs.A, 1);
+    cpu.regs.A = math.rotl(u8, cpu.regs.A, 1);
     cpu.setFlag(.Z, false);
     cpu.setFlag(.N, false);
     cpu.setFlag(.H, false);
@@ -293,7 +293,7 @@ fn RLCA(cpu: *Cpu) void {
 fn RRCA(cpu: *Cpu) void {
     const carry = cpu.regs.A & 0b1;
 
-    cpu.regs.A = std.math.rotr(u8, cpu.regs.A, 1);
+    cpu.regs.A = math.rotr(u8, cpu.regs.A, 1);
     cpu.setFlag(.Z, false);
     cpu.setFlag(.N, false);
     cpu.setFlag(.H, false);
@@ -1247,7 +1247,7 @@ fn RLC_r8(cpu: *Cpu) void {
     var value = cpu.getR8(r8);
     const carry = value >> 7;
 
-    value = std.math.rotl(u8, value, 1);
+    value = math.rotl(u8, value, 1);
 
     cpu.setR8(r8, value);
     cpu.setFlag(.Z, value == 0);
@@ -1270,7 +1270,7 @@ fn RRC_r8(cpu: *Cpu) void {
     var value = cpu.getR8(r8);
     const carry = value & 0b1;
 
-    value = std.math.rotr(u8, value, 1);
+    value = math.rotr(u8, value, 1);
 
     cpu.setR8(r8, value);
     cpu.setFlag(.Z, value == 0);
