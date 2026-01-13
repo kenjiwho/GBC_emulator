@@ -5,13 +5,14 @@ const Bus = @This();
 const Timer = @import("Timer.zig");
 const Mbc = @import("Mbc.zig").Mbc;
 const Io = @import("Io.zig");
+const Gb = @import("Gb.zig");
 
 // Memory Map
 ROM: []const u8 = undefined, // 16KiB ROM bank 00 (0000-3FFF) + switchable bank 01-NN (4000-7FFF)
-VRAM: [0x2000]u8 = @splat(0), // 8KiB Video RAM (GBC mode: switchable 0/1): 8000-9FFF
-external_RAM: [0x8000]u8 = @splat(0), // 8KiB External RAM (possibly switchable 00-03): A000-BFFF
+VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
+external_RAM: [0x2000 * 4]u8 = @splat(0), // 8/32KiB External RAM (possibly switchable 00-03): A000-BFFF
 WRAM_0: [0x1000]u8 = @splat(0), // 4KiB Work RAM Bank 0: C000-CFFF
-WRAM_S: [0x1000]u8 = @splat(0), // 4KiB Work RAM (GBC mode: switchable 1-7): D000-DFFF
+WRAM_S: [0x1000 * 8]u8 = @splat(0), // 4KiB Work RAM switchable 1-7: D000-DFFF
 // EchoRAM: Echo of C000-DDFF: E000-FDFF (typically not used)
 OAM: [0xA0]u8 = @splat(0), // Object Attribute Memory (OAM): FE00-FE9F
 Unusable: [0x60]u8 = @splat(0), // Usage is prohibited: FEA0-FEFF
@@ -20,12 +21,15 @@ HRAM: [0x7F]u8 = @splat(0), // High RAM: FF80-FFFE
 IE: u8 = 0, // Interrupt Enable Register: FFFF
 
 // Modules
-timer: *Timer = undefined,
-io: *Io = undefined,
+timer: Timer,
+io: Io,
 mbc: Mbc = undefined,
 
-pub fn init() Bus {
-    return Bus{};
+pub fn init(gb: *Gb) Bus {
+    const timer = Timer.init(&gb.bus);
+    const io = Io.init(&gb.bus);
+
+    return Bus{ .timer = timer, .io = io };
 }
 
 pub fn insertROM(self: *Bus, rom: []const u8) void {
@@ -37,7 +41,7 @@ pub fn insertROM(self: *Bus, rom: []const u8) void {
     self.mbc = Mbc.init(cartridge_type, rom_size_code);
 }
 
-pub fn read(self: *const Bus, address: u16) u8 {
+pub fn read(self: *Bus, address: u16) u8 {
     self.timer.tick(); // advance timer on each read
 
     return switch (address) {

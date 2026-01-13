@@ -4,14 +4,10 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Cpu = @import("Cpu.zig");
 const Bus = @import("Bus.zig");
-const Timer = @import("Timer.zig");
-const Io = @import("Io.zig");
 
 cpu: Cpu,
-timer: Timer,
-io: Io,
 bus: Bus, // memory-mapped I/O
-screen: [160 * 144]u8 = @splat(0), // 160x144 pixels
+screen: [144 * 160]u8 = @splat(0), // 144x160 pixels
 
 pub fn init(allocator: Allocator, rom: []const u8) !*Gb {
     // put GB instance on heap so self-references work
@@ -19,14 +15,8 @@ pub fn init(allocator: Allocator, rom: []const u8) !*Gb {
     errdefer allocator.destroy(gb);
 
     // init modules
-    gb.bus = Bus.init();
+    gb.bus = Bus.init(gb);
     gb.cpu = Cpu.init(&gb.bus);
-    gb.timer = Timer.init(&gb.bus);
-    gb.io = Io.init(&gb.bus);
-
-    // connect modules to bus
-    gb.bus.timer = &gb.timer;
-    gb.bus.io = &gb.io;
 
     // ---------------------- USED IN BLARGG TESTING ----------------------
     try gb.load_rom(allocator, rom);
