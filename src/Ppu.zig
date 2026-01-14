@@ -18,6 +18,7 @@ pub fn init(bus: *Bus) Ppu {
 const std = @import("std");
 pub fn step(self: *Ppu, dots: usize) void {
     _ = self;
+    _ = dots;
     // PPU step logic goes here
-    std.debug.print("{d}\n", .{dots});
+    // std.debug.print("{d}\n", .{dots});
 }

@@ -14,11 +14,16 @@ const DeviceMode = enum {
     CGB,
 };
 
+const CPU_CLOCK_HZ = 4_194_304;
+const CYCLES_PER_FRAME = 70_224;
+const SECONDS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) / CPU_CLOCK_HZ;
+
 cpu: Cpu,
 ppu: Ppu,
 bus: Bus, // memory-mapped I/O
 screen_texture: rl.Texture2D = undefined,
 device_mode: DeviceMode = .DMG, // default to DMG mode
+cycles_executed: usize = 0, // cycles executed in current frame
 
 pub fn init(allocator: Allocator, rom: []const u8) !*Gbc {
     // put GB instance on heap so self-references work
@@ -26,9 +31,15 @@ pub fn init(allocator: Allocator, rom: []const u8) !*Gbc {
     errdefer allocator.destroy(gbc);
 
     // init modules
-    gbc.bus = Bus.init(gbc);
-    gbc.cpu = Cpu.init(&gbc.bus);
-    gbc.ppu = Ppu.init(&gbc.bus);
+    const bus = Bus.init(gbc);
+    const cpu = Cpu.init(&gbc.bus);
+    const ppu = Ppu.init(&gbc.bus);
+
+    gbc.* = Gbc{
+        .cpu = cpu,
+        .ppu = ppu,
+        .bus = bus,
+    };
 
     // ---------------------- USED IN BLARGG TESTING ----------------------
     try gbc.load_rom(allocator, rom);
@@ -63,7 +74,7 @@ fn load_rom(self: *Gbc, allocator: Allocator, rom_file: []const u8) !void {
 }
 
 pub fn run(self: *Gbc) void {
-    rl.SetTargetFPS(144);
+    rl.SetTargetFPS(120);
     rl.InitWindow(160 * 5, 144 * 5, "game window");
     defer rl.CloseWindow();
 
@@ -73,27 +84,37 @@ pub fn run(self: *Gbc) void {
     defer rl.UnloadTexture(self.screen_texture);
     rl.UnloadImage(image);
 
-    // var accumulator: u32 = 0; // accumulator for frame timing
+    var accumulator: f64 = 0; // accumulator for frame timing
 
     while (!rl.WindowShouldClose()) {
-        self.step_frame();
-        self.draw();
+        accumulator += rl.GetFrameTime();
+        while (accumulator >= SECONDS_PER_FRAME) : (accumulator -= SECONDS_PER_FRAME) {
+            self.step_frame();
+            self.cycles_executed -= CYCLES_PER_FRAME;
+        }
+        self.render();
     }
 }
 
+/// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
-    self.cpu.step() catch {
-        const opcode = self.bus.read(self.cpu.regs.PC - 1);
-        std.debug.print("CRASH: Attempted to execute invalid opcode: ${X} at PC: ${X}\n", .{ opcode, self.cpu.regs.PC - 1 });
-        std.process.exit(1);
-    };
+    while (self.cycles_executed < CYCLES_PER_FRAME) {
+        self.cpu.step() catch {
+            const opcode = self.bus.read(self.cpu.regs.PC - 1);
+            std.debug.print("CRASH: Attempted to execute invalid opcode: ${X} at PC: ${X}\n", .{ opcode, self.cpu.regs.PC - 1 });
+            std.process.exit(1);
+        };
 
-    const cycles = self.bus.timer.getLastCycles();
+        const cycles = self.bus.timer.getLastCycles();
 
-    self.ppu.step(cycles);
+        self.ppu.step(cycles);
+
+        self.cycles_executed += cycles;
+    }
 }
 
-fn draw(self: *const Gbc) void {
+/// Render the current screen to the window
+fn render(self: *const Gbc) void {
     rl.BeginDrawing();
     defer rl.EndDrawing();
 
@@ -115,4 +136,6 @@ fn draw(self: *const Gbc) void {
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
     rl.DrawTexturePro(self.screen_texture, source_rect, dest_rect, origin, 0, rl.WHITE);
+
+    rl.DrawFPS(10, 10);
 }
