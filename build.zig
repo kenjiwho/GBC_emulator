@@ -11,6 +11,14 @@ pub fn build(b: *std.Build) void {
         .imports = &.{},
     });
 
+    // ------------------------ Dependencies ------------------------
+    const raylibDep = b.dependency("raylib", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe_module.linkLibrary(raylibDep.artifact("raylib"));
+    // --------------------------------------------------------------
+
     const exe = b.addExecutable(.{
         .name = "GB_emulator",
         .root_module = exe_module,

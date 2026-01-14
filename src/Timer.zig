@@ -9,6 +9,7 @@ TAC: u8 = 0b0000, // controls TIMA speed
 prev_signal: bool = false, // previous state of the selected TIMA bit
 reload_delay: u3 = 0, // delay counter for TIMA reload
 bus: *Bus, // reference to the bus for interrupt requests
+last_cycles_taken: usize = 0, // number of T_cycles taken for last cpu step
 
 pub fn init(bus: *Bus) Timer {
     return Timer{ .bus = bus };
@@ -28,6 +29,7 @@ pub fn tick(self: *Timer) void {
         }
 
         self.counter +%= 1;
+        self.last_cycles_taken += 1;
 
         self.timaIncrementCheck();
     }
@@ -62,6 +64,12 @@ fn timaIncrementCheck(self: *Timer) void {
     }
 
     self.prev_signal = curr_signal;
+}
+
+pub fn getLastCycles(self: *Timer) usize {
+    const cycles = self.last_cycles_taken;
+    self.last_cycles_taken = 0;
+    return cycles;
 }
 
 pub fn read(self: *Timer, address: u16) u8 {

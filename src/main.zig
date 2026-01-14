@@ -1,5 +1,5 @@
 const std = @import("std");
-const Gb = @import("Gb.zig");
+const Gbc = @import("Gbc.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -20,10 +20,10 @@ pub fn main() !void {
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/halt_bug.gb");
-    var gb = try Gb.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
-    defer gb.deinit(allocator);
+    var gbc = try Gbc.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
+    defer gbc.deinit(allocator);
 
-    gb.run();
+    gbc.run();
 }
 
 test {

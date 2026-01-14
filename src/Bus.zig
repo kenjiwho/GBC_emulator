@@ -5,7 +5,7 @@ const Bus = @This();
 const Timer = @import("Timer.zig");
 const Mbc = @import("Mbc.zig").Mbc;
 const Io = @import("Io.zig");
-const Gb = @import("Gb.zig");
+const Gbc = @import("Gbc.zig");
 
 // Memory Map
 ROM: []const u8 = undefined, // 16KiB ROM bank 00 (0000-3FFF) + switchable bank 01-NN (4000-7FFF)
@@ -25,7 +25,7 @@ timer: Timer,
 io: Io,
 mbc: Mbc = undefined,
 
-pub fn init(gb: *Gb) Bus {
+pub fn init(gb: *Gbc) Bus {
     const timer = Timer.init(&gb.bus);
     const io = Io.init(&gb.bus);
 
