@@ -82,7 +82,7 @@ fn getTile(self: *Fetcher, ppu: *Ppu) void {
         map_y = ppu.ly - ppu.wy;
     } else {
         map_x = ((ppu.scx / 8) + self.fetcher_x) & 0x1F;
-        map_y = (ppu.ly + ppu.scy) & 255;
+        map_y = (ppu.ly + ppu.scy) & 0xFF;
     }
 
     const address = tile_map + (map_y * 32) + map_x;
@@ -95,7 +95,9 @@ fn tryPush(self: *Fetcher, ppu: *Ppu) void {
         return;
     }
 
-    try ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high);
+    ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high) catch {
+        unreachable;
+    };
     self.current_task = .get_tile;
     self.fetcher_x += 1;
 }
