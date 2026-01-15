@@ -7,7 +7,7 @@ const rl = @cImport({
 const Allocator = std.mem.Allocator;
 const Cpu = @import("Cpu.zig");
 const Bus = @import("Bus.zig");
-const Ppu = @import("Ppu.zig");
+const Ppu = @import("ppu/Ppu.zig");
 
 const DeviceMode = enum {
     DMG,
@@ -40,6 +40,11 @@ pub fn init(allocator: Allocator, rom: []const u8) !*Gbc {
         .ppu = ppu,
         .bus = bus,
     };
+
+    _ = gbc.ppu.fetcher.getTile();
+    gbc.ppu.lx = 42;
+    _ = gbc.ppu.fetcher.getTile();
+    std.process.exit(0);
 
     // ---------------------- USED IN BLARGG TESTING ----------------------
     try gbc.load_rom(allocator, rom);

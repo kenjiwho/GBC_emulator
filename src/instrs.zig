@@ -489,7 +489,7 @@ fn STOP(cpu: *Cpu) void {
         return;
     }
 
-    if ((key1 & 0b1) == 0) { // speed switch not requested
+    if (!key1.switch_armed) { // speed switch not requested
         if (pending_interrupts != 0) {
             // 1-byte opcode STOP
             cpu.bus.timer.write(0xFF04, 0x00); // reset DIV

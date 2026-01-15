@@ -1,5 +1,5 @@
 //! Memory Bank Controller (MBC) abstraction
-const Mbc1 = @import("mbc/Mbc1.zig");
+const Mbc1 = @import("Mbc1.zig");
 
 pub const Mbc = union(enum) {
     Mbc1: Mbc1,

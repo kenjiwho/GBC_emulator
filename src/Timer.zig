@@ -2,10 +2,12 @@ const Timer = @This();
 
 const Bus = @import("Bus.zig");
 
-counter: u16 = 0,
+// registers
+counter: u16 = 0, // internal counter/DIV
 TIMA: u8 = 0,
 TMA: u8 = 0, // controls TIMA reset value
 TAC: u8 = 0b0000, // controls TIMA speed
+
 prev_signal: bool = false, // previous state of the selected TIMA bit
 reload_delay: u3 = 0, // delay counter for TIMA reload
 bus: *Bus, // reference to the bus for interrupt requests
@@ -24,7 +26,7 @@ pub fn tick(self: *Timer) void {
             self.reload_delay -= 1;
             if (self.reload_delay == 0) {
                 self.TIMA = self.TMA;
-                self.bus.io.requestInterrupt(.Timer);
+                self.bus.io.requestInterrupt(.timer);
             }
         }
 
