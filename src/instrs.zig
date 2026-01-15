@@ -3,7 +3,7 @@ const Cpu = @import("Cpu.zig");
 const Registers = @import("Registers.zig");
 
 // opcode function type
-const DispatchFn = *const fn (cpu: *Cpu) Cpu.CpuError!void;
+const DispatchFn = *const fn (cpu: *Cpu) Cpu.Error!void;
 
 const dispatch_ptr_tbl: [4]DispatchFn = .{
     dispatch0,
@@ -13,12 +13,12 @@ const dispatch_ptr_tbl: [4]DispatchFn = .{
 };
 
 /// execute the next instruction (fetch-decode-execute)
-pub fn execute(cpu: *Cpu) Cpu.CpuError!void {
+pub fn execute(cpu: *Cpu) Cpu.Error!void {
     try dispatch_ptr_tbl[(cpu.opcode >> 6)](cpu);
 }
 
 // --------------------------------- opcode dispatchers --------------------
-fn dispatch0(cpu: *Cpu) Cpu.CpuError!void {
+fn dispatch0(cpu: *Cpu) Cpu.Error!void {
     switch (cpu.opcode) { // full opcode
         0x00 => NOP(cpu),
         0x08 => LD_imm16_SP(cpu),
@@ -49,13 +49,13 @@ fn dispatch0(cpu: *Cpu) Cpu.CpuError!void {
         },
     }
 }
-fn dispatch1(cpu: *Cpu) Cpu.CpuError!void {
+fn dispatch1(cpu: *Cpu) Cpu.Error!void {
     switch (cpu.opcode) { // full opcode
         0x76 => HALT(cpu),
         else => LD_r8_r8(cpu),
     }
 }
-fn dispatch2(cpu: *Cpu) Cpu.CpuError!void {
+fn dispatch2(cpu: *Cpu) Cpu.Error!void {
     switch (cpu.opcode >> 3) { // upper 5 bits
         0b10000 => ADD_A_r8(cpu),
         0b10001 => ADC_A_r8(cpu),
@@ -68,7 +68,7 @@ fn dispatch2(cpu: *Cpu) Cpu.CpuError!void {
         else => unreachable,
     }
 }
-fn dispatch3(cpu: *Cpu) Cpu.CpuError!void {
+fn dispatch3(cpu: *Cpu) Cpu.Error!void {
     switch (cpu.opcode) { // full opcode
         0xC6 => ADD_A_imm8(cpu),
         0xCE => ADC_A_imm8(cpu),
@@ -96,7 +96,7 @@ fn dispatch3(cpu: *Cpu) Cpu.CpuError!void {
         0xF3 => DI(cpu),
         0xFB => EI(cpu),
         // invalid opcodes
-        0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD => return Cpu.CpuError.InvalidOpcode,
+        0xD3, 0xDB, 0xDD, 0xE3, 0xE4, 0xEB, 0xEC, 0xED, 0xF4, 0xFC, 0xFD => return Cpu.Error.InvalidOpcode,
         else => {
             switch (cpu.opcode & 0b111) { // lower 3 bits
                 0b000 => RET_cond(cpu),

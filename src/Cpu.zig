@@ -15,7 +15,7 @@ stopped: bool = false,
 HALT_bug: bool = false, // whether the HALT bug should be simulated
 bus: *Bus, // reference to the bus struct so instructions can interact with memory
 
-pub const CpuError = error{
+pub const Error = error{
     InvalidOpcode,
 };
 
@@ -24,7 +24,7 @@ pub fn init(bus: *Bus) Cpu {
 }
 
 /// perform a single CPU step with IME, HALT, and interrupt handling
-pub fn step(self: *Cpu) CpuError!void {
+pub fn step(self: *Cpu) Error!void {
     const IE = self.bus.IE;
     const IF = self.bus.io.getIF();
     const pending_interrupts = IE & IF;

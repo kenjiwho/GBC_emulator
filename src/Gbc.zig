@@ -41,11 +41,6 @@ pub fn init(allocator: Allocator, rom: []const u8) !*Gbc {
         .bus = bus,
     };
 
-    _ = gbc.ppu.fetcher.getTile();
-    gbc.ppu.lx = 42;
-    _ = gbc.ppu.fetcher.getTile();
-    std.process.exit(0);
-
     // ---------------------- USED IN BLARGG TESTING ----------------------
     try gbc.load_rom(allocator, rom);
     gbc.cpu.regs.PC = 0x0100;

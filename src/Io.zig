@@ -38,14 +38,7 @@ pub fn read(self: *const Io, address: u16) u8 {
     return switch (address) {
         0xFF00 => self.getJoyp(),
         0xFF04...0xFF07 => self.bus.timer.read(address),
-        0xFF40 => @bitCast(self.bus.ppu.lcdc),
-        0xFF41 => @bitCast(self.bus.ppu.stat),
-        0xFF42 => self.bus.ppu.scy,
-        0xFF43 => self.bus.ppu.scx,
-        0xFF44 => self.bus.ppu.ly,
-        0xFF45 => self.bus.ppu.lyc,
-        0xFF4A => self.bus.ppu.wy,
-        0xFF4B => self.bus.ppu.wx,
+        0xFF40...0xFF45, 0xFF47...0xFF4B => self.bus.ppu.read(address),
         0xFF4D => self.IOPorts[0x4D], // KEY1
         0xFF4F => self.bus.vbk,
         0xFF70 => self.bus.wbk,
@@ -66,14 +59,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
     switch (address) {
         0xFF00 => self.setJoyp(value),
         0xFF04...0xFF07 => self.bus.timer.write(address, value),
-        0xFF40 => self.bus.ppu.lcdc = @bitCast(value),
-        0xFF41 => self.bus.ppu.stat = @bitCast(value),
-        0xFF42 => self.bus.ppu.scy = value,
-        0xFF43 => self.bus.ppu.scx = value,
-        0xFF44 => {}, // LY is read-only
-        0xFF45 => self.bus.ppu.lyc = value,
-        0xFF4A => self.bus.ppu.wy = value,
-        0xFF4B => self.bus.ppu.wx = value,
+        0xFF40...0xFF45, 0xFF47...0xFF4B => self.bus.ppu.write(address, value),
         0xFF4D => self.setKey1(value),
         0xFF4F => self.bus.vbk = @intCast(value & 0b1),
         0xFF70 => self.bus.wbk = @min(value & 0b111, 1),
