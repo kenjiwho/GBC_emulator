@@ -44,8 +44,7 @@ wy: u8 = 0, // window Y position
 wx: u8 = 0, // window X position plus 7
 
 lx: u8 = 0, // current pixel within the scanline
-fetcher_bg: Fetcher = Fetcher.init(),
-fetcher_obj: Fetcher = Fetcher.init(),
+fetcher: Fetcher = Fetcher.init(),
 vram_blocked: bool = false,
 
 fifo_bg: Fifo = Fifo.init(),
@@ -61,7 +60,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
     var dots_used: usize = 0;
 
     while (dots_used < cycles) {
-        const dots = self.fetcher_bg.tick(self);
+        const dots = self.fetcher.tick(self);
         dots_used += dots;
     }
 }
