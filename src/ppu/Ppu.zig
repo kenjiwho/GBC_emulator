@@ -31,6 +31,7 @@ const Stat = packed struct {
     _padding: u1 = 0,
 };
 
+VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.BLACK), // 144x160 pixels
 
 // registers
@@ -44,9 +45,10 @@ wy: u8 = 0, // window Y position
 wx: u8 = 0, // window X position plus 7
 
 lx: u8 = 0, // current pixel within the scanline
-fetcher: Fetcher = Fetcher.init(),
+vbk: u1 = 0, // Current VRAM bank (CGB only)
 vram_blocked: bool = false,
 
+fetcher: Fetcher = Fetcher.init(),
 fifo_bg: Fifo = Fifo.init(),
 fifo_obj: Fifo = Fifo.init(),
 bus: *Bus, // reference to the bus for memory-mapped I/O
@@ -57,12 +59,23 @@ pub fn init(bus: *Bus) Ppu {
 
 const std = @import("std");
 pub fn step(self: *Ppu, cycles: usize) void {
-    var dots_used: usize = 0;
+    _ = self;
+    _ = cycles;
+    // var dots_used: usize = 0;
 
-    while (dots_used < cycles) {
-        const dots = self.fetcher.tick(self);
-        dots_used += dots;
-    }
+    // while (dots_used < cycles) {
+    //     const dots = self.fetcher.tick(self);
+    //     dots_used += dots;
+    // }
+}
+
+// VRAM read/write
+pub fn readVram(self: *const Ppu, address: u16) u8 {
+    return self.VRAM[address - 0x8000 + (@as(u16, self.vbk) * 0x2000)];
+}
+
+pub fn writeVram(self: *Ppu, address: u16, value: u8) void {
+    self.VRAM[address - 0x8000 + (@as(u16, self.vbk) * 0x2000)] = value;
 }
 
 // Memory-mapped I/O read/write

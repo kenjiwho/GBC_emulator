@@ -35,7 +35,7 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             } else {
                 const address = tileIndexToAddress(self.tile_index, ppu);
 
-                self.tile_data_low = ppu.bus.VRAM[address - 0x8000];
+                self.tile_data_low = ppu.readVram(address);
             }
             return 2;
         },
@@ -86,17 +86,13 @@ fn getTile(self: *Fetcher, ppu: *Ppu) void {
     }
 
     const address = tile_map + (map_y * 32) + map_x;
-    self.tile_index = ppu.bus.VRAM[address - 0x8000];
+    self.tile_index = ppu.readVram(address);
 }
 
 /// Attempts to push the fetched tile data into the background FIFO
 fn tryPush(self: *Fetcher, ppu: *Ppu) void {
-    if (ppu.fifo_bg.count != 0) {
-        return;
-    }
-
     ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high) catch {
-        unreachable;
+        return;
     };
     self.current_task = .get_tile;
     self.fetcher_x += 1;
