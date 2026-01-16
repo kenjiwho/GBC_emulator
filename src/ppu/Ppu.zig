@@ -1,3 +1,5 @@
+//! PPU (Pixel Processing Unit) implementation
+//! created with reference to https://github.com/ISSOtm/pandocs/blob/rendering-internals/src/Rendering_Internals.md
 const Ppu = @This();
 
 const rl = @cImport({

@@ -70,22 +70,14 @@ fn getTile(self: *Fetcher, ppu: *Ppu) void {
     }
 
     const inside_window = (ppu.ly >= ppu.wy) and (ppu.lx + 7 >= ppu.wx);
-    const use_high_map = (ppu.lcdc.bg_tile_map_area == 1 and !inside_window) or (ppu.lcdc.window_tile_map_area == 1 and inside_window);
+    const window_y = ppu.ly + 7 - ppu.wy;
 
-    const tile_map: u16 = if (use_high_map) 0x9C00 else 0x9800;
+    const base = 0x9800;
+    const bit10 = if (inside_window) ppu.lcdc.window_tile_map_area else ppu.lcdc.bg_tile_map_area;
+    const map_y = if (inside_window) window_y / 8 else ((ppu.ly + ppu.scy) % 256) / 8;
+    const map_x = if (inside_window) ppu.lx / 8 else ((ppu.lx + ppu.scx) % 256) / 8;
 
-    var map_x: u8 = 0;
-    var map_y: u8 = 0;
-
-    if (inside_window) {
-        map_x = ppu.lx + 7 - ppu.wx;
-        map_y = ppu.ly - ppu.wy;
-    } else {
-        map_x = ((ppu.scx / 8) + self.fetcher_x) & 0x1F;
-        map_y = (ppu.ly + ppu.scy) & 0xFF;
-    }
-
-    const address = tile_map + (map_y * 32) + map_x;
+    const address = base | (@as(u16, bit10) << 10) | (@as(u16, map_y) << 5) | @as(u16, map_x);
     self.tile_index = ppu.readVram(address);
 }
 
