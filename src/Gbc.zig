@@ -22,6 +22,7 @@ cpu: Cpu,
 ppu: Ppu,
 bus: Bus, // memory-mapped I/O
 screen_texture: rl.Texture2D = undefined,
+debug_texture: rl.Texture2D = undefined,
 device_mode: DeviceMode = .DMG, // default to DMG mode
 cycles_executed: usize = 0, // cycles executed in current frame
 
@@ -84,6 +85,12 @@ pub fn run(self: *Gbc) void {
     defer rl.UnloadTexture(self.screen_texture);
     rl.UnloadImage(image);
 
+    // create an empty texture for the screen
+    const debug_image = rl.GenImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.BLACK);
+    self.debug_texture = rl.LoadTextureFromImage(debug_image);
+    defer rl.UnloadTexture(self.debug_texture);
+    rl.UnloadImage(debug_image);
+
     var accumulator: f64 = 0; // accumulator for frame timing
 
     while (!rl.WindowShouldClose()) {
@@ -123,6 +130,7 @@ fn render(self: *const Gbc) void {
 
     rl.ClearBackground(rl.BLACK);
     rl.UpdateTexture(self.screen_texture, &self.ppu.screen);
+    rl.UpdateTexture(self.debug_texture, &self.ppu.debug_screen);
 
     const source_rect = rl.Rectangle{
         .x = 0,
@@ -139,6 +147,7 @@ fn render(self: *const Gbc) void {
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
     rl.DrawTexturePro(self.screen_texture, source_rect, dest_rect, origin, 0, rl.WHITE);
+    rl.DrawTexturePro(self.debug_texture, source_rect, dest_rect, origin, 0, rl.WHITE);
 
     rl.DrawFPS(10, 10);
 }

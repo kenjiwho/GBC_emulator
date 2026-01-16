@@ -6,20 +6,15 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/01-special.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/02-interrupts.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/03-op sp,hl.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/04-op r,imm.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/05-op rp.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/06-ld r,r.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/07-jr,jp,call,ret,rst.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/08-misc instrs.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/09-op r,r.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/10-bit ops.gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
-    // try gb.load_rom("./tests/blargg_test/halt_bug.gb");
-    var gbc = try Gbc.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
+    const args = try std.process.argsAlloc(allocator);
+    if (args.len != 2) {
+        std.debug.print("Usage: {s} <path to rom>\n", .{args[0]});
+        return;
+    }
+    const rom = args[1];
+
+    var gbc = try Gbc.init(allocator, rom);
+    // var gbc = try Gbc.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
     // var gbc = try Gbc.init(allocator, "./.roms/mealybug/m2_win_en_toggle.gb");
     // var gbc = try Gbc.init(allocator, "./.roms/Tetris.gb");
     defer gbc.deinit(allocator);

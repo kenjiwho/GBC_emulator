@@ -42,6 +42,7 @@ const Stat = packed struct {
 
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.BLACK), // 144x160 pixels
+debug_screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color{ .a = 0 }), // 144x160 pixels
 
 // registers
 lcdc: Lcdc = Lcdc{},
@@ -53,6 +54,7 @@ lyc: u8 = 0, // LY compare
 wy: u8 = 0, // window Y position
 wx: u8 = 0, // window X position plus 7
 
+wy_trigger: bool = false, // whether window Y has been triggered
 lcd_x: u8 = 0, // current pixel within the scanline
 vram_blocked: bool = false,
 total_dots: usize = 0, // total dots elapsed in current scanline
@@ -73,7 +75,9 @@ pub fn step(self: *Ppu, cycles: usize) void {
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
             .oam_scan => {
-                // OAM Scan
+                if (!self.wy_trigger and self.total_dots == 0 and self.ly == self.wy) {
+                    self.wy_trigger = true;
+                }
                 const dots = self.oamScan();
                 dots_used += dots;
                 self.total_dots += dots;
@@ -82,24 +86,13 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 }
             },
             .drawing => {
-                // Pixel Drawing
                 const dots = self.fetcher.tick(self);
                 dots_used += dots;
 
                 for (0..dots) |_| {
-                    // Drawing pixels
-                    const pixel = self.fifo_bg.pop() catch {
+                    self.drawPixel() catch {
                         break;
                     };
-
-                    const color = switch (pixel.color_index) {
-                        0 => rl.RAYWHITE,
-                        1 => rl.LIGHTGRAY,
-                        2 => rl.DARKGRAY,
-                        3 => rl.BLACK,
-                    };
-                    self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lcd_x)] = color;
-                    self.lcd_x += 1;
 
                     if (self.lcd_x >= 160) {
                         // End of scanline
@@ -114,7 +107,6 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 }
             },
             .hblank => {
-                // HBlank
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
@@ -130,7 +122,6 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 }
             },
             .vblank => {
-                // VBlank
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
@@ -139,6 +130,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     if (self.ly > 153) {
                         self.ly = 0;
                         self.stat.ppu_mode = .oam_scan;
+                        self.wy_trigger = false;
                     }
                 }
             },
@@ -150,6 +142,19 @@ fn oamScan(self: *Ppu) usize {
     _ = self;
     // OAM Scan takes 80 dots
     return 2;
+}
+
+fn drawPixel(self: *Ppu) !void {
+    const pixel = try self.fifo_bg.pop();
+
+    const color = switch (pixel.color_index) {
+        0 => rl.RAYWHITE,
+        1 => rl.LIGHTGRAY,
+        2 => rl.DARKGRAY,
+        3 => rl.BLACK,
+    };
+    self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lcd_x)] = color;
+    self.lcd_x += 1;
 }
 
 // VRAM read/write
