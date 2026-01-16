@@ -11,14 +11,6 @@ pub fn build(b: *std.Build) void {
         .imports = &.{},
     });
 
-    // ------------------------ Dependencies ------------------------
-    const raylibDep = b.dependency("raylib", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe_module.linkLibrary(raylibDep.artifact("raylib"));
-    // --------------------------------------------------------------
-
     const exe = b.addExecutable(.{
         .name = "GB_emulator",
         .root_module = exe_module,
@@ -28,6 +20,20 @@ pub fn build(b: *std.Build) void {
         .name = "GB_emulator",
         .root_module = exe_module,
     });
+
+    // ------------------------ Dependencies ------------------------
+    const raylib_dep = b.dependency("raylib_zig", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const raylib = raylib_dep.module("raylib"); // main raylib module
+    const raygui = raylib_dep.module("raygui"); // raygui module
+    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
+    exe.linkLibrary(raylib_artifact);
+    exe_module.addImport("raylib", raylib);
+    exe_module.addImport("raygui", raygui);
+    // --------------------------------------------------------------
 
     b.installArtifact(exe);
 

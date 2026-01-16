@@ -1,9 +1,7 @@
 const Gbc = @This();
 
 const std = @import("std");
-const rl = @cImport({
-    @cInclude("raylib.h");
-});
+const rl = @import("raylib");
 const Allocator = std.mem.Allocator;
 const Cpu = @import("Cpu.zig");
 const Bus = @import("Bus.zig");
@@ -74,27 +72,27 @@ fn load_rom(self: *Gbc, allocator: Allocator, rom_file: []const u8) !void {
     self.bus.insertROM(rom);
 }
 
-pub fn run(self: *Gbc) void {
-    rl.SetTargetFPS(120);
-    rl.InitWindow(160 * 5, 144 * 5, "game window");
-    defer rl.CloseWindow();
+pub fn run(self: *Gbc) !void {
+    rl.setTargetFPS(120);
+    rl.initWindow(160 * 5, 144 * 5, "game window");
+    defer rl.closeWindow();
 
     // create an empty texture for the screen
-    const image = rl.GenImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.BLACK);
-    self.screen_texture = rl.LoadTextureFromImage(image);
-    defer rl.UnloadTexture(self.screen_texture);
-    rl.UnloadImage(image);
+    const image = rl.genImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.Color.black);
+    self.screen_texture = try rl.loadTextureFromImage(image);
+    defer rl.unloadTexture(self.screen_texture);
+    rl.unloadImage(image);
 
     // create an empty texture for the screen
-    const debug_image = rl.GenImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.BLACK);
-    self.debug_texture = rl.LoadTextureFromImage(debug_image);
-    defer rl.UnloadTexture(self.debug_texture);
-    rl.UnloadImage(debug_image);
+    const debug_image = rl.genImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.Color.black);
+    self.debug_texture = try rl.loadTextureFromImage(debug_image);
+    defer rl.unloadTexture(self.debug_texture);
+    rl.unloadImage(debug_image);
 
     var accumulator: f64 = 0; // accumulator for frame timing
 
-    while (!rl.WindowShouldClose()) {
-        accumulator += rl.GetFrameTime();
+    while (!rl.windowShouldClose()) {
+        accumulator += rl.getFrameTime();
         while (accumulator >= SECONDS_PER_FRAME) : (accumulator -= SECONDS_PER_FRAME) {
             self.step_frame();
             self.cycles_executed -= CYCLES_PER_FRAME;
@@ -122,15 +120,15 @@ fn step_frame(self: *Gbc) void {
 
 /// Render the current screen to the window
 fn render(self: *const Gbc) void {
-    const window_width: f32 = @floatFromInt(rl.GetScreenWidth());
-    const window_height: f32 = @floatFromInt(rl.GetScreenHeight());
+    const window_width: f32 = @floatFromInt(rl.getScreenWidth());
+    const window_height: f32 = @floatFromInt(rl.getScreenHeight());
 
-    rl.BeginDrawing();
-    defer rl.EndDrawing();
+    rl.beginDrawing();
+    defer rl.endDrawing();
 
-    rl.ClearBackground(rl.BLACK);
-    rl.UpdateTexture(self.screen_texture, &self.ppu.screen);
-    rl.UpdateTexture(self.debug_texture, &self.ppu.debug_screen);
+    rl.clearBackground(rl.Color.black);
+    rl.updateTexture(self.screen_texture, &self.ppu.screen);
+    rl.updateTexture(self.debug_texture, &self.ppu.debug_screen);
 
     const source_rect = rl.Rectangle{
         .x = 0,
@@ -146,8 +144,8 @@ fn render(self: *const Gbc) void {
     };
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
-    rl.DrawTexturePro(self.screen_texture, source_rect, dest_rect, origin, 0, rl.WHITE);
-    rl.DrawTexturePro(self.debug_texture, source_rect, dest_rect, origin, 0, rl.WHITE);
+    rl.drawTexturePro(self.screen_texture, source_rect, dest_rect, origin, 0, rl.Color.white);
+    rl.drawTexturePro(self.debug_texture, source_rect, dest_rect, origin, 0, rl.Color.white);
 
-    rl.DrawFPS(10, 10);
+    rl.drawFPS(10, 10);
 }

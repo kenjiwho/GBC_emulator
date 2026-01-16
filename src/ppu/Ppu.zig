@@ -2,9 +2,7 @@
 //! created with reference to https://github.com/ISSOtm/pandocs/blob/rendering-internals/src/Rendering_Internals.md
 const Ppu = @This();
 
-const rl = @cImport({
-    @cInclude("raylib.h");
-});
+const rl = @import("raylib");
 const Bus = @import("../Bus.zig");
 const Fetcher = @import("Fetcher.zig");
 const Fifo = @import("Fifo.zig");
@@ -41,8 +39,8 @@ const Stat = packed struct {
 };
 
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
-screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.BLACK), // 144x160 pixels
-debug_screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color{ .a = 0 }), // 144x160 pixels
+screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color.black), // 144x160 pixels
+debug_screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 }), // 144x160 pixels
 
 // registers
 lcdc: Lcdc = Lcdc{},
@@ -148,10 +146,10 @@ fn drawPixel(self: *Ppu) !void {
     const pixel = try self.fifo_bg.pop();
 
     const color = switch (pixel.color_index) {
-        0 => rl.RAYWHITE,
-        1 => rl.LIGHTGRAY,
-        2 => rl.DARKGRAY,
-        3 => rl.BLACK,
+        0 => rl.Color.ray_white,
+        1 => rl.Color.light_gray,
+        2 => rl.Color.dark_gray,
+        3 => rl.Color.black,
     };
     self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lcd_x)] = color;
     self.lcd_x += 1;

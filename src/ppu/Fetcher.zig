@@ -1,6 +1,7 @@
 //! fetcher for the ppu
 const Fetcher = @This();
 
+const rl = @import("raylib");
 const Ppu = @import("Ppu.zig");
 
 const Task = enum {
@@ -66,8 +67,15 @@ fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
 
     if (!self.inside_window) {
         self.inside_window = ppu.lcdc.window_enable and ppu.wy_trigger and (self.fetcher_x + 7 >= ppu.wx);
+        ppu.fifo_bg.clear();
+    } else {
+        self.inside_window = ppu.lcdc.window_enable and ppu.wy_trigger and (self.fetcher_x + 7 >= ppu.wx);
     }
     const window_y = if (self.inside_window) ppu.ly - ppu.wy else 0;
+
+    // if (self.inside_window) {
+    //     ppu.debug_screen[ppu.ly * 160 + @as(usize, self.fetcher_x)] = rl.Color.red;
+    // }
 
     const base = 0x9800;
     const bit10 = if (self.inside_window) ppu.lcdc.window_tile_map_area else ppu.lcdc.bg_tile_map_area;

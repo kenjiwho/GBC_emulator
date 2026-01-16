@@ -20,7 +20,7 @@ pub fn main() !void {
     // var gbc = try Gbc.init(allocator, "./.roms/Tetris.gb");
     defer gbc.deinit(allocator);
 
-    gbc.run();
+    try gbc.run();
 }
 
 test {
