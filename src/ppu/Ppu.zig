@@ -53,7 +53,7 @@ lyc: u8 = 0, // LY compare
 wy: u8 = 0, // window Y position
 wx: u8 = 0, // window X position plus 7
 
-lx: u8 = 0, // current pixel within the scanline
+lcd_x: u8 = 0, // current pixel within the scanline
 vram_blocked: bool = false,
 total_dots: usize = 0, // total dots elapsed in current scanline
 
@@ -98,16 +98,17 @@ pub fn step(self: *Ppu, cycles: usize) void {
                         2 => rl.DARKGRAY,
                         3 => rl.BLACK,
                     };
-                    self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lx)] = color;
-                    self.lx += 1;
+                    self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lcd_x)] = color;
+                    self.lcd_x += 1;
 
-                    if (self.lx >= 160) {
+                    if (self.lcd_x >= 160) {
                         // End of scanline
                         self.stat.ppu_mode = .hblank;
                         self.total_dots = 0;
-                        self.lx = 0;
+                        self.lcd_x = 0;
                         self.fifo_bg.clear();
                         self.fetcher.current_task = .get_tile;
+                        self.fetcher.fetcher_x = 0;
                         break;
                     }
                 }

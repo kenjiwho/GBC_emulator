@@ -6,7 +6,6 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    // try gb.load_rom("./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/01-special.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/02-interrupts.gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/03-op sp,hl.gb");
@@ -20,7 +19,9 @@ pub fn main() !void {
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/halt_bug.gb");
-    var gbc = try Gbc.init(allocator, "./.roms/mealybug/m2_win_en_toggle.gb");
+    var gbc = try Gbc.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
+    // var gbc = try Gbc.init(allocator, "./.roms/mealybug/m2_win_en_toggle.gb");
+    // var gbc = try Gbc.init(allocator, "./.roms/Tetris.gb");
     defer gbc.deinit(allocator);
 
     gbc.run();
