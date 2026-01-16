@@ -13,7 +13,8 @@ external_RAM_enabled: bool = false,
 
 pub fn init(rom_size_code: u8) Mbc1 {
     const ROM_size: u21 = @as(u21, 0x8000) * (@as(u7, 1) << @intCast(rom_size_code));
-    const num_ROM_banks: u128 = ROM_size / 0x4000;
+    // >> 14 to get number of 16KB banks
+    const num_ROM_banks: u128 = ROM_size >> 14;
     const num_bits_ROM_banks: u3 = @intFromFloat(@log2(@as(f32, @floatFromInt(num_ROM_banks))));
 
     return Mbc1{
@@ -57,7 +58,8 @@ pub fn mapROMAddress(self: *const Mbc1, address: u16) u21 {
                 true_bank = true_bank & ((@as(u7, 1) << self.num_bits_ROM_banks) - 1);
             }
 
-            return ((address - 0x4000) + (@as(u21, true_bank) * 0x4000)) % self.ROM_size;
+            // << 14 is a faster equivalent to * 0x4000
+            return ((address - 0x4000) + (@as(u21, true_bank) << 14)) % self.ROM_size;
         },
         else => unreachable, // invalid address for ROM banking
     }
@@ -69,7 +71,8 @@ pub fn mapRAMAddress(self: *const Mbc1, address: u16) u15 {
         ram_bank = self.secondary_bank;
     }
 
-    return @intCast(((address - 0xA000) + (@as(u15, ram_bank) * 0x2000)) % 0x8000);
+    // << 13 is a faster equivalent to * 0x2000
+    return @intCast(((address - 0xA000) + (@as(u15, ram_bank) << 13)) % 0x8000);
 }
 
 pub fn toggleExternalRAM(self: *Mbc1, value: u8) void {

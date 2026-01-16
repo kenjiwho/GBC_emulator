@@ -29,7 +29,6 @@ pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8) error{Overflow}!
         const pixel = Pixel{
             .color_index = color_index,
             .palette = null,
-            .sprite_priority = null,
             .background_priority = false,
         };
         self.buffer[self.tail] = pixel;
@@ -47,4 +46,11 @@ pub fn pop(self: *Fifo) error{Underflow}!Pixel {
     self.head = (self.head + 1) % 8;
     self.count -= 1;
     return pixel;
+}
+
+/// Clears the FIFO
+pub fn clear(self: *Fifo) void {
+    self.head = 0;
+    self.tail = 0;
+    self.count = 0;
 }

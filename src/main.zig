@@ -20,7 +20,7 @@ pub fn main() !void {
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/cpu_instrs/individual/11-op a,(hl).gb");
     // try gb.load_rom("./tests/blargg_test/halt_bug.gb");
-    var gbc = try Gbc.init(allocator, "./tests/blargg_test/cpu_instrs/cpu_instrs.gb");
+    var gbc = try Gbc.init(allocator, "./.roms/mealybug/m2_win_en_toggle.gb");
     defer gbc.deinit(allocator);
 
     gbc.run();

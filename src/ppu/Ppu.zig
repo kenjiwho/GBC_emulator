@@ -23,8 +23,15 @@ const Lcdc = packed struct {
     lcd_ppu_enable: bool = false, // 7
 };
 
+const PpuMode = enum(u2) {
+    hblank = 0,
+    vblank = 1,
+    oam_scan = 2,
+    drawing = 3,
+};
+
 const Stat = packed struct {
-    ppu_mode: u2 = 0, // 0-1
+    ppu_mode: PpuMode = PpuMode.oam_scan, // 0-1
     lyc_eq_ly: bool = false, // 2
     mode0_interrupt: bool = false, // 3
     mode1_interrupt: bool = false, // 4
@@ -47,8 +54,8 @@ wy: u8 = 0, // window Y position
 wx: u8 = 0, // window X position plus 7
 
 lx: u8 = 0, // current pixel within the scanline
-vbk: u1 = 0, // Current VRAM bank (CGB only)
 vram_blocked: bool = false,
+total_dots: usize = 0, // total dots elapsed in current scanline
 
 fetcher: Fetcher = Fetcher.init(),
 fifo_bg: Fifo = Fifo.init(),
@@ -61,23 +68,96 @@ pub fn init(bus: *Bus) Ppu {
 
 const std = @import("std");
 pub fn step(self: *Ppu, cycles: usize) void {
-    _ = self;
-    _ = cycles;
-    // var dots_used: usize = 0;
+    var dots_used: usize = 0;
 
-    // while (dots_used < cycles) {
-    //     const dots = self.fetcher.tick(self);
-    //     dots_used += dots;
-    // }
+    while (dots_used < cycles) {
+        switch (self.stat.ppu_mode) {
+            .oam_scan => {
+                // OAM Scan
+                const dots = self.oamScan();
+                dots_used += dots;
+                self.total_dots += dots;
+                if (self.total_dots >= 80) {
+                    self.stat.ppu_mode = .drawing;
+                }
+            },
+            .drawing => {
+                // Pixel Drawing
+                const dots = self.fetcher.tick(self);
+                dots_used += dots;
+
+                for (0..dots) |_| {
+                    // Drawing pixels
+                    const pixel = self.fifo_bg.pop() catch {
+                        break;
+                    };
+
+                    const color = switch (pixel.color_index) {
+                        0 => rl.RAYWHITE,
+                        1 => rl.LIGHTGRAY,
+                        2 => rl.DARKGRAY,
+                        3 => rl.BLACK,
+                    };
+                    self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lx)] = color;
+                    self.lx += 1;
+
+                    if (self.lx >= 160) {
+                        // End of scanline
+                        self.stat.ppu_mode = .hblank;
+                        self.total_dots = 0;
+                        self.lx = 0;
+                        self.fifo_bg.clear();
+                        self.fetcher.current_task = .get_tile;
+                        break;
+                    }
+                }
+            },
+            .hblank => {
+                // HBlank
+                dots_used += 2;
+                self.total_dots += 2;
+                if (self.total_dots >= 456) {
+                    self.total_dots = 0;
+                    self.ly += 1;
+                    if (self.ly >= 144) {
+                        self.stat.ppu_mode = .vblank;
+                        // Trigger VBlank interrupt
+                        self.bus.io.requestInterrupt(.vblank);
+                    } else {
+                        self.stat.ppu_mode = .oam_scan;
+                    }
+                }
+            },
+            .vblank => {
+                // VBlank
+                dots_used += 2;
+                self.total_dots += 2;
+                if (self.total_dots >= 456) {
+                    self.total_dots = 0;
+                    self.ly += 1;
+                    if (self.ly > 153) {
+                        self.ly = 0;
+                        self.stat.ppu_mode = .oam_scan;
+                    }
+                }
+            },
+        }
+    }
+}
+
+fn oamScan(self: *Ppu) usize {
+    _ = self;
+    // OAM Scan takes 80 dots
+    return 2;
 }
 
 // VRAM read/write
-pub fn readVram(self: *const Ppu, address: u16) u8 {
-    return self.VRAM[address - 0x8000 + (@as(u16, self.vbk) * 0x2000)];
+pub fn readVram(self: *const Ppu, bank: u1, address: u16) u8 {
+    return self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)];
 }
 
-pub fn writeVram(self: *Ppu, address: u16, value: u8) void {
-    self.VRAM[address - 0x8000 + (@as(u16, self.vbk) * 0x2000)] = value;
+pub fn writeVram(self: *Ppu, bank: u1, address: u16, value: u8) void {
+    self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)] = value;
 }
 
 // Memory-mapped I/O read/write

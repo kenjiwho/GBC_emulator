@@ -115,6 +115,9 @@ fn step_frame(self: *Gbc) void {
 
 /// Render the current screen to the window
 fn render(self: *const Gbc) void {
+    const window_width: f32 = @floatFromInt(rl.GetScreenWidth());
+    const window_height: f32 = @floatFromInt(rl.GetScreenHeight());
+
     rl.BeginDrawing();
     defer rl.EndDrawing();
 
@@ -130,8 +133,8 @@ fn render(self: *const Gbc) void {
     const dest_rect = rl.Rectangle{
         .x = 0,
         .y = 0,
-        .width = Ppu.SCREEN_WIDTH,
-        .height = Ppu.SCREEN_HEIGHT,
+        .width = window_width,
+        .height = window_height,
     };
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
