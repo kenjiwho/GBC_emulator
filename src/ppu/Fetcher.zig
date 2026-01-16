@@ -94,7 +94,7 @@ fn tileIndexToAddress(self: *const Fetcher, ppu: *Ppu) u16 {
 
     const base = 0x8000;
     const bit12 = if (ppu.lcdc.bg_window_tile_data_area == 1) 0 else (~self.tile_id >> 7);
-    const row_offset = if (self.inside_window) window_y % 8 else (ppu.ly + ppu.scy) % 8;
+    const row_offset = if (self.inside_window) window_y % 8 else (ppu.ly +% ppu.scy) % 8;
 
     const address = base | (@as(u16, bit12) << 12) | (@as(u16, self.tile_id & 0x7F) << 4) | (@as(u16, row_offset) << 1);
 
