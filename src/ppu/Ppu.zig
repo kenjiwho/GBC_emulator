@@ -73,13 +73,14 @@ pub fn step(self: *Ppu, cycles: usize) void {
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
             .oam_scan => {
-                if (!self.wy_trigger and self.total_dots == 0 and self.ly == self.wy) {
+                if (self.total_dots == 0 and self.ly >= self.wy) {
                     self.wy_trigger = true;
                 }
                 const dots = self.oamScan();
                 dots_used += dots;
                 self.total_dots += dots;
                 if (self.total_dots >= 80) {
+                    self.wy_trigger = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
                 }
             },
@@ -93,13 +94,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     };
 
                     if (self.lcd_x >= 160) {
-                        // End of scanline
                         self.stat.ppu_mode = .hblank;
-                        self.total_dots = 0;
-                        self.lcd_x = 0;
-                        self.fifo_bg.clear();
-                        self.fetcher.current_task = .get_tile;
-                        self.fetcher.fetcher_x = 0;
                         break;
                     }
                 }
@@ -108,8 +103,8 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
-                    self.total_dots = 0;
-                    self.ly += 1;
+                    // End of scanline
+                    self.resetLine();
                     if (self.ly >= 144) {
                         self.stat.ppu_mode = .vblank;
                         // Trigger VBlank interrupt
@@ -123,17 +118,29 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
+                    // End of scanline
                     self.total_dots = 0;
                     self.ly += 1;
                     if (self.ly > 153) {
                         self.ly = 0;
                         self.stat.ppu_mode = .oam_scan;
-                        self.wy_trigger = false;
                     }
                 }
             },
         }
     }
+}
+
+/// Prepares PPU, FIFO, and Fetcher for the next scanline
+pub fn resetLine(self: *Ppu) void {
+    self.total_dots = 0;
+    self.ly += 1;
+    self.lcd_x = 0;
+    self.fifo_bg.clear();
+    self.fetcher.current_task = .get_tile;
+    self.fetcher.fetcher_x = 0;
+    self.wy_trigger = false;
+    self.fetcher.inside_window = false;
 }
 
 fn oamScan(self: *Ppu) usize {

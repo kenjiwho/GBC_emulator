@@ -1,8 +1,8 @@
 const Gbc = @This();
 
 const std = @import("std");
-const rl = @import("raylib");
 const Allocator = std.mem.Allocator;
+const rl = @import("raylib");
 const Cpu = @import("Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
@@ -103,6 +103,7 @@ pub fn run(self: *Gbc) !void {
 
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
+    self.ppu.debug_screen = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 });
     while (self.cycles_executed < CYCLES_PER_FRAME) {
         self.cpu.step() catch {
             const opcode = self.bus.read(self.cpu.regs.PC - 1);

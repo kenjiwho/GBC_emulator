@@ -12,11 +12,11 @@ const Task = enum {
 };
 
 current_task: Task = .get_tile,
-fetcher_x: u8 = 0,
+fetcher_x: u8 = 0, // current x position of the fetcher in pixels
 tile_id: u8 = 0,
 tile_data_low: u8 = 0,
 tile_data_high: u8 = 0,
-inside_window: bool = false,
+inside_window: bool = false, // whether the fetcher is currently fetching window tiles
 
 pub fn init() Fetcher {
     return Fetcher{};
@@ -52,7 +52,7 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
         },
         .push => {
             tryPush(self, ppu);
-            return 1;
+            return 2;
         },
     }
 }
@@ -66,16 +66,13 @@ fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
     }
 
     if (!self.inside_window) {
-        self.inside_window = ppu.lcdc.window_enable and ppu.wy_trigger and (self.fetcher_x + 7 >= ppu.wx);
-        ppu.fifo_bg.clear();
-    } else {
-        self.inside_window = ppu.lcdc.window_enable and ppu.wy_trigger and (self.fetcher_x + 7 >= ppu.wx);
+        self.inside_window = ppu.wy_trigger and (self.fetcher_x + 7 >= ppu.wx);
+        if (self.inside_window) {
+            ppu.fifo_bg.clear();
+        }
     }
-    const window_y = if (self.inside_window) ppu.ly - ppu.wy else 0;
 
-    // if (self.inside_window) {
-    //     ppu.debug_screen[ppu.ly * 160 + @as(usize, self.fetcher_x)] = rl.Color.red;
-    // }
+    const window_y = if (self.inside_window) ppu.ly - ppu.wy else 0;
 
     const base = 0x9800;
     const bit10 = if (self.inside_window) ppu.lcdc.window_tile_map_area else ppu.lcdc.bg_tile_map_area;
