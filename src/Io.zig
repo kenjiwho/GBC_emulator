@@ -38,6 +38,7 @@ pub fn read(self: *const Io, address: u16) u8 {
     return switch (address) {
         0xFF00 => self.getJoyp(),
         0xFF04...0xFF07 => self.bus.timer.read(address),
+        0xFF0F => self.getIF(),
         0xFF40...0xFF45, 0xFF47...0xFF4B => self.bus.ppu.read(address),
         0xFF4D => self.IOPorts[0x4D], // KEY1
         0xFF4F => self.bus.vbk,
@@ -59,6 +60,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
     switch (address) {
         0xFF00 => self.setJoyp(value),
         0xFF04...0xFF07 => self.bus.timer.write(address, value),
+        0xFF0F => self.setIF(value),
         0xFF40...0xFF45, 0xFF47...0xFF4B => self.bus.ppu.write(address, value),
         0xFF4D => self.setKey1(value),
         0xFF4F => self.bus.vbk = @intCast(value & 0b1),
@@ -70,7 +72,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
 // Seperate getters and setters when reads/writes should not tick the timer
 
 pub fn getIF(self: *const Io) u8 {
-    return self.IOPorts[0x0F];
+    return self.IOPorts[0x0F] | 0xE0; // unused bits read as 1
 }
 
 pub fn setIF(self: *Io, value: u8) void {

@@ -27,7 +27,7 @@ pub fn init(bus: *Bus) Cpu {
 pub fn step(self: *Cpu) Error!void {
     const IE = self.bus.IE;
     const IF = self.bus.io.getIF();
-    const pending_interrupts = IE & IF;
+    const pending_interrupts = IE & IF & 0x1F;
 
     // handle STOP state
     if (self.stopped) {

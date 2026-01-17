@@ -475,7 +475,7 @@ fn STOP(cpu: *Cpu) void {
     const key1 = cpu.bus.io.getKey1();
     const IE = cpu.bus.IE;
     const IF = cpu.bus.io.getIF();
-    const pending_interrupts = IE & IF;
+    const pending_interrupts = IE & IF & 0x1F;
 
     if ((joyp & 0x0F) != 0x0F) { // button pressed
         if (pending_interrupts != 0) {
