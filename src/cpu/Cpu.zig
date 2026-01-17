@@ -2,7 +2,7 @@
 const Cpu = @This();
 
 const Registers = @import("Registers.zig");
-const Bus = @import("Bus.zig");
+const Bus = @import("../Bus.zig");
 const instrs = @import("instrs.zig");
 
 opcode: u8 = 0, // current opcode

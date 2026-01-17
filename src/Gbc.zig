@@ -3,7 +3,7 @@ const Gbc = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const rl = @import("raylib");
-const Cpu = @import("Cpu.zig");
+const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
 

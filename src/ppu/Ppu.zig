@@ -74,13 +74,13 @@ pub fn step(self: *Ppu, cycles: usize) void {
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
             .oam_scan => {
+                if (!self.wy_trigger and self.ly == self.wy and self.lcdc.window_enable) {
+                    self.wy_trigger = true;
+                }
                 const dots = self.oamScan();
                 dots_used += dots;
                 self.total_dots += dots;
                 if (self.total_dots >= 80) {
-                    if (!self.wy_trigger and self.ly == self.wy and self.lcdc.window_enable) {
-                        self.wy_trigger = true;
-                    }
                     self.inside_window = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
                 }
@@ -96,6 +96,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
 
                     if (self.lcd_x >= 160) {
                         self.stat.ppu_mode = .hblank;
+                        self.checkInterrupts();
                         break;
                     }
                 }
@@ -108,12 +109,14 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     self.resetLine();
                     if (self.ly >= 144) {
                         self.stat.ppu_mode = .vblank;
+                        self.checkInterrupts();
                         self.wy_trigger = false;
                         self.fetcher.wl_internal = 0;
                         // Trigger VBlank interrupt
                         self.bus.io.requestInterrupt(.vblank);
                     } else {
                         self.stat.ppu_mode = .oam_scan;
+                        self.checkInterrupts();
                     }
                 }
             },
@@ -123,10 +126,11 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 if (self.total_dots >= 456) {
                     // End of scanline
                     self.total_dots = 0;
-                    self.ly += 1;
+                    self.incrementLy();
                     if (self.ly > 153) {
                         self.ly = 0;
                         self.stat.ppu_mode = .oam_scan;
+                        // self.checkInterrupts();
                     }
                 }
             },
@@ -137,12 +141,34 @@ pub fn step(self: *Ppu, cycles: usize) void {
 /// Prepares PPU, FIFO, and Fetcher for the next scanline
 pub fn resetLine(self: *Ppu) void {
     self.total_dots = 0;
-    self.ly += 1;
+    self.incrementLy();
     self.lcd_x = 0;
     self.fifo_bg.clear();
     self.fetcher.current_task = .get_tile;
     self.fetcher.fetcher_x = 0;
     self.fetcher.inside_window = false;
+}
+
+fn incrementLy(self: *Ppu) void {
+    self.ly += 1;
+    self.stat.lyc_eq_ly = self.ly == self.lyc;
+    self.checkInterrupts();
+}
+
+fn checkInterrupts(self: *Ppu) void {
+    // Mode interrupts
+    const mode_interrupt = switch (self.stat.ppu_mode) {
+        .hblank => self.stat.mode0_interrupt,
+        .vblank => self.stat.mode1_interrupt,
+        .oam_scan => self.stat.mode2_interrupt,
+        .drawing => false,
+    };
+
+    const lyc_interrupt = self.stat.lyc_eq_ly and self.stat.lyc_interrupt;
+
+    if (lyc_interrupt or mode_interrupt) {
+        self.bus.io.requestInterrupt(.stat);
+    }
 }
 
 fn oamScan(self: *Ppu) usize {
@@ -193,19 +219,23 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
     switch (address) {
         0xFF40 => {
             const lcdc: Lcdc = @bitCast(value);
-            std.debug.print("{b}\n", .{value});
-            if (lcdc.window_enable) {
-                std.debug.print("WINDOW ENABLED DURING {any} on ly={d}, dot={d}\n", .{ self.stat.ppu_mode, self.ly, self.total_dots });
-            } else {
-                std.debug.print("WINDOW DISABLED DURING {any} on ly={d}, dot={d}\n", .{ self.stat.ppu_mode, self.ly, self.total_dots });
-            }
-            self.lcdc = @bitCast(value);
+            self.lcdc = lcdc;
         },
-        0xFF41 => self.stat = @bitCast(value),
+        0xFF41 => {
+            var new_stat: Stat = @bitCast(value);
+
+            new_stat.lyc_eq_ly = self.stat.lyc_eq_ly; // LYC=LY flag is read-only
+            new_stat.ppu_mode = self.stat.ppu_mode; // mode bits are read-only
+
+            self.stat = new_stat;
+        },
         0xFF42 => self.scy = value,
         0xFF43 => self.scx = value,
         0xFF44 => {}, // LY is read-only
-        0xFF45 => self.lyc = value,
+        0xFF45 => {
+            self.lyc = value;
+            self.checkInterrupts();
+        },
         0xFF4A => self.wy = value,
         0xFF4B => self.wx = value,
         else => {},

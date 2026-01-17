@@ -1,5 +1,5 @@
 const std = @import("std");
-const Cpu = @import("../Cpu.zig");
+const Cpu = @import("../cpu/Cpu.zig");
 const Bus = @import("../Bus.zig");
 const Timer = @import("../Timer.zig");
 const Io = @import("../Io.zig");

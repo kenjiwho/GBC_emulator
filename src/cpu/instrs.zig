@@ -1,6 +1,5 @@
 const math = @import("std").math;
 const Cpu = @import("Cpu.zig");
-const Registers = @import("Registers.zig");
 
 // opcode function type
 const DispatchFn = *const fn (cpu: *Cpu) Cpu.Error!void;

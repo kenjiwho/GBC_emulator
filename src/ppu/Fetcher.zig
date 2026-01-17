@@ -1,7 +1,6 @@
 //! fetcher for the ppu
 const Fetcher = @This();
 
-const rl = @import("raylib");
 const Ppu = @import("Ppu.zig");
 
 const Task = enum {
@@ -58,7 +57,6 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
     }
 }
 
-const std = @import("std");
 /// Determines which background/window tile to fetch pixels from
 fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
     self.current_task = .get_tile_data_low;
