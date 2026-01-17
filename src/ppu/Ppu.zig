@@ -53,6 +53,7 @@ wy: u8 = 0, // window Y position
 wx: u8 = 0, // window X position plus 7
 
 wy_trigger: bool = false, // whether window Y has been triggered
+inside_window: bool = false, // whether fetcher is currently fetching window tiles
 lcd_x: u8 = 0, // current pixel within the scanline
 vram_blocked: bool = false,
 total_dots: usize = 0, // total dots elapsed in current scanline
@@ -73,14 +74,14 @@ pub fn step(self: *Ppu, cycles: usize) void {
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
             .oam_scan => {
-                if (self.total_dots == 0 and self.ly >= self.wy) {
-                    self.wy_trigger = true;
-                }
                 const dots = self.oamScan();
                 dots_used += dots;
                 self.total_dots += dots;
                 if (self.total_dots >= 80) {
-                    self.wy_trigger = self.wy_trigger and self.lcdc.window_enable;
+                    if (!self.wy_trigger and self.ly == self.wy and self.lcdc.window_enable) {
+                        self.wy_trigger = true;
+                    }
+                    self.inside_window = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
                 }
             },
@@ -107,6 +108,8 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     self.resetLine();
                     if (self.ly >= 144) {
                         self.stat.ppu_mode = .vblank;
+                        self.wy_trigger = false;
+                        self.fetcher.wl_internal = 0;
                         // Trigger VBlank interrupt
                         self.bus.io.requestInterrupt(.vblank);
                     } else {
@@ -139,7 +142,6 @@ pub fn resetLine(self: *Ppu) void {
     self.fifo_bg.clear();
     self.fetcher.current_task = .get_tile;
     self.fetcher.fetcher_x = 0;
-    self.wy_trigger = false;
     self.fetcher.inside_window = false;
 }
 
@@ -189,7 +191,16 @@ pub fn read(self: *const Ppu, address: u16) u8 {
 
 pub fn write(self: *Ppu, address: u16, value: u8) void {
     switch (address) {
-        0xFF40 => self.lcdc = @bitCast(value),
+        0xFF40 => {
+            const lcdc: Lcdc = @bitCast(value);
+            std.debug.print("{b}\n", .{value});
+            if (lcdc.window_enable) {
+                std.debug.print("WINDOW ENABLED DURING {any} on ly={d}, dot={d}\n", .{ self.stat.ppu_mode, self.ly, self.total_dots });
+            } else {
+                std.debug.print("WINDOW DISABLED DURING {any} on ly={d}, dot={d}\n", .{ self.stat.ppu_mode, self.ly, self.total_dots });
+            }
+            self.lcdc = @bitCast(value);
+        },
         0xFF41 => self.stat = @bitCast(value),
         0xFF42 => self.scy = value,
         0xFF43 => self.scx = value,

@@ -13,6 +13,7 @@ const Task = enum {
 
 current_task: Task = .get_tile,
 fetcher_x: u8 = 0, // current x position of the fetcher in pixels
+wl_internal: u8 = 0, // internal window line counter
 tile_id: u8 = 0,
 tile_data_low: u8 = 0,
 tile_data_high: u8 = 0,
@@ -66,13 +67,14 @@ fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
     }
 
     if (!self.inside_window) {
-        self.inside_window = ppu.wy_trigger and (self.fetcher_x + 7 >= ppu.wx);
+        self.inside_window = ppu.inside_window and (self.fetcher_x + 7 >= ppu.wx);
         if (self.inside_window) {
+            self.wl_internal += 1;
             ppu.fifo_bg.clear();
         }
     }
 
-    const window_y = if (self.inside_window) ppu.ly - ppu.wy else 0;
+    const window_y = if (self.inside_window) self.wl_internal - 1 else 0;
 
     const base = 0x9800;
     const bit10 = if (self.inside_window) ppu.lcdc.window_tile_map_area else ppu.lcdc.bg_tile_map_area;
@@ -95,7 +97,7 @@ fn tryPush(self: *Fetcher, ppu: *Ppu) void {
 
 /// Converts a tile index to its corresponding address in VRAM
 fn tileIndexToAddress(self: *const Fetcher, ppu: *Ppu) u16 {
-    const window_y = if (self.inside_window) ppu.ly - ppu.wy else 0;
+    const window_y = if (self.inside_window) self.wl_internal - 1 else 0;
 
     const base = 0x8000;
     const bit12 = if (ppu.lcdc.bg_window_tile_data_area == 1) 0 else (~self.tile_id >> 7);
