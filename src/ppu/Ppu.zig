@@ -146,7 +146,12 @@ pub fn resetLine(self: *Ppu) void {
     self.fifo_bg.clear();
     self.fetcher.current_task = .get_tile;
     self.fetcher.fetcher_x = 0;
+    // increment window line internal counter once if inside window
+    if (self.inside_window) {
+        self.fetcher.wl_internal += 1;
+    }
     self.fetcher.inside_window = false;
+    self.inside_window = false;
 }
 
 fn incrementLy(self: *Ppu) void {
@@ -219,6 +224,11 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
     switch (address) {
         0xFF40 => {
             const lcdc: Lcdc = @bitCast(value);
+
+            if (lcdc.bg_tile_map_area != self.lcdc.bg_tile_map_area) {
+                std.debug.print("LCDC BG MAP WRITTEN: {any}\n", .{lcdc.bg_tile_map_area});
+            }
+
             self.lcdc = lcdc;
         },
         0xFF41 => {
