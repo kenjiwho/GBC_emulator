@@ -68,6 +68,7 @@ fn timaIncrementCheck(self: *Timer) void {
     self.prev_signal = curr_signal;
 }
 
+/// Return the amount of T_cycles taken since the last call, and reset the counter
 pub fn getLastCycles(self: *Timer) usize {
     const cycles = self.last_cycles_taken;
     self.last_cycles_taken = 0;

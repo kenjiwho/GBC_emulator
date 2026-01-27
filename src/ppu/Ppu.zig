@@ -6,41 +6,19 @@ const rl = @import("raylib");
 const Bus = @import("../Bus.zig");
 const Fetcher = @import("Fetcher.zig");
 const Fifo = @import("Fifo.zig");
+const ppu_structs = @import("ppu_structs.zig");
+const Lcdc = ppu_structs.Lcdc;
+const Stat = ppu_structs.Stat;
+const OamEntry = ppu_structs.OamEntry;
 
 pub const SCREEN_HEIGHT: f32 = 144;
 pub const SCREEN_WIDTH: f32 = 160;
 
-const Lcdc = packed struct {
-    priority: bool = false, // 0
-    obj_enable: bool = false, // 1
-    obj_size: u1 = 0, // 2
-    bg_tile_map_area: u1 = 0, // 3
-    bg_window_tile_data_area: u1 = 0, // 4
-    window_enable: bool = false, // 5
-    window_tile_map_area: u1 = 0, // 6
-    lcd_ppu_enable: bool = false, // 7
-};
-
-const PpuMode = enum(u2) {
-    hblank = 0,
-    vblank = 1,
-    oam_scan = 2,
-    drawing = 3,
-};
-
-const Stat = packed struct {
-    ppu_mode: PpuMode = PpuMode.oam_scan, // 0-1
-    lyc_eq_ly: bool = false, // 2
-    mode0_interrupt: bool = false, // 3
-    mode1_interrupt: bool = false, // 4
-    mode2_interrupt: bool = false, // 5
-    lyc_interrupt: bool = false, // 6
-    _padding: u1 = 0,
-};
-
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color.black), // 144x160 pixels
 debug_screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 }), // 144x160 pixels
+oam_buffer: [10]OamEntry = undefined, // buffer for up to 10 sprites per scanline
+oam_count: u8 = 0, // number of sprites in the oam_buffer
 
 // registers
 lcdc: Lcdc = Lcdc{},
@@ -74,13 +52,13 @@ pub fn step(self: *Ppu, cycles: usize) void {
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
             .oam_scan => {
-                if (!self.wy_trigger and self.ly == self.wy and self.lcdc.window_enable) {
-                    self.wy_trigger = true;
-                }
                 const dots = self.oamScan();
                 dots_used += dots;
                 self.total_dots += dots;
                 if (self.total_dots >= 80) {
+                    if (!self.wy_trigger and self.ly == self.wy and self.lcdc.window_enable) {
+                        self.wy_trigger = true;
+                    }
                     self.inside_window = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
                 }
@@ -177,8 +155,24 @@ fn checkInterrupts(self: *Ppu) void {
 }
 
 fn oamScan(self: *Ppu) usize {
-    _ = self;
-    // OAM Scan takes 80 dots
+    // OAM Scan takes 80 dots (2 dots per OAM entry)
+
+    const offset = self.total_dots / 2;
+    const entry = OamEntry{
+        .y_position = self.bus.OAM[offset * 4 + 0],
+        .x_position = self.bus.OAM[offset * 4 + 1],
+        .tile_index = self.bus.OAM[offset * 4 + 2],
+        .attributes = @bitCast(self.bus.OAM[offset * 4 + 3]),
+    };
+
+    if (self.oam_count < 10 and
+        entry.y_position > self.ly + 16 and
+        entry.y_position <= self.ly + 16 + 8 + (8 * @as(u8, self.lcdc.obj_size)))
+    {
+        self.oam_buffer[self.oam_count] = entry;
+        self.oam_count += 1;
+    }
+
     return 2;
 }
 
@@ -214,6 +208,7 @@ pub fn read(self: *const Ppu, address: u16) u8 {
         0xFF43 => self.scx,
         0xFF44 => self.ly,
         0xFF45 => self.lyc,
+        0xFF46 => 0, // OAM DMA is write-only
         0xFF4A => self.wy,
         0xFF4B => self.wx,
         else => 0,
@@ -232,8 +227,7 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
             self.lcdc = lcdc;
         },
         0xFF41 => {
-            var new_stat: Stat = @bitCast(value);
-
+            var new_stat: ppu_structs.Stat = @bitCast(value);
             new_stat.lyc_eq_ly = self.stat.lyc_eq_ly; // LYC=LY flag is read-only
             new_stat.ppu_mode = self.stat.ppu_mode; // mode bits are read-only
 
@@ -246,6 +240,7 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
             self.lyc = value;
             self.checkInterrupts();
         },
+        0xFF46 => self.bus.dma.startTransfer(value), // enable OAM DMA transfer mode
         0xFF4A => self.wy = value,
         0xFF4B => self.wx = value,
         else => {},

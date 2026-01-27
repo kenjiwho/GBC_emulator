@@ -2,12 +2,7 @@
 const Fifo = @This();
 
 const Error = error{ Overflow, Underflow };
-
-const Pixel = struct {
-    color_index: u2,
-    palette: ?u1,
-    background_priority: bool,
-};
+const Pixel = @import("ppu_structs.zig").Pixel;
 
 head: usize = 0, // index of first pixel in FIFO
 tail: usize = 0, // where the next pixel will be added

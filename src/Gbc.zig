@@ -6,6 +6,7 @@ const rl = @import("raylib");
 const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
+const Dma = @import("Dma.zig");
 
 const DeviceMode = enum {
     DMG,
@@ -19,6 +20,7 @@ const SECONDS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) / CPU_C
 cpu: Cpu,
 ppu: Ppu,
 bus: Bus, // memory-mapped I/O
+dma: Dma,
 screen_texture: rl.Texture2D = undefined,
 debug_texture: rl.Texture2D = undefined,
 device_mode: DeviceMode = .DMG, // default to DMG mode
@@ -33,11 +35,13 @@ pub fn init(allocator: Allocator, rom: []const u8) !*Gbc {
     const bus = Bus.init(gbc);
     const cpu = Cpu.init(&gbc.bus);
     const ppu = Ppu.init(&gbc.bus);
+    const dma = Dma.init(&gbc.bus);
 
     gbc.* = Gbc{
         .cpu = cpu,
         .ppu = ppu,
         .bus = bus,
+        .dma = dma,
     };
 
     // ---------------------- USED IN BLARGG TESTING ----------------------
@@ -103,13 +107,20 @@ pub fn run(self: *Gbc) !void {
 
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
+    std.debug.print("{any}\n", .{self.bus.OAM});
+
     self.ppu.debug_screen = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 });
     while (self.cycles_executed < CYCLES_PER_FRAME) {
-        self.cpu.step() catch {
-            const opcode = self.bus.read(self.cpu.regs.PC - 1);
-            std.debug.print("CRASH: Attempted to execute invalid opcode: ${X} at PC: ${X}\n", .{ opcode, self.cpu.regs.PC - 1 });
-            std.process.exit(1);
-        };
+        if (self.dma.counter > 0) {
+            self.dma.step();
+            std.debug.print("DMA TRANSFER HAPPENING\n", .{});
+        } else {
+            self.cpu.step() catch {
+                const opcode = self.bus.read(self.cpu.regs.PC - 1);
+                std.debug.print("CRASH: Attempted to execute invalid opcode: ${X} at PC: ${X}\n", .{ opcode, self.cpu.regs.PC - 1 });
+                std.process.exit(1);
+            };
+        }
 
         const cycles = self.bus.timer.getLastCycles();
 

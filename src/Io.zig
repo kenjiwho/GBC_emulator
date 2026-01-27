@@ -39,7 +39,7 @@ pub fn read(self: *const Io, address: u16) u8 {
         0xFF00 => self.getJoyp(),
         0xFF04...0xFF07 => self.bus.timer.read(address),
         0xFF0F => self.getIF(),
-        0xFF40...0xFF45, 0xFF47...0xFF4B => self.bus.ppu.read(address),
+        0xFF40...0xFF4B => self.bus.ppu.read(address),
         0xFF4D => self.IOPorts[0x4D], // KEY1
         0xFF4F => self.bus.vbk,
         0xFF70 => self.bus.wbk,
@@ -61,7 +61,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
         0xFF00 => self.setJoyp(value),
         0xFF04...0xFF07 => self.bus.timer.write(address, value),
         0xFF0F => self.setIF(value),
-        0xFF40...0xFF45, 0xFF47...0xFF4B => self.bus.ppu.write(address, value),
+        0xFF40...0xFF4B => self.bus.ppu.write(address, value),
         0xFF4D => self.setKey1(value),
         0xFF4F => self.bus.vbk = @intCast(value & 0b1),
         0xFF70 => self.bus.wbk = @min(value & 0b111, 1),

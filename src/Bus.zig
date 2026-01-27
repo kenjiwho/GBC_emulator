@@ -7,6 +7,7 @@ const Mbc = @import("mbc/Mbc.zig").Mbc;
 const Io = @import("Io.zig");
 const Gbc = @import("Gbc.zig");
 const Ppu = @import("ppu/Ppu.zig");
+const Dma = @import("Dma.zig");
 
 // Memory Map
 ROM: []const u8 = undefined, // 16KiB ROM bank 00 (0000-3FFF) + switchable bank 01-NN (4000-7FFF)
@@ -25,6 +26,7 @@ timer: Timer,
 io: Io,
 ppu: *Ppu = undefined,
 mbc: Mbc = undefined,
+dma: *Dma = undefined,
 
 vbk: u1 = 0, // Current VRAM bank (CGB only)
 wbk: u3 = 1, // Current WRAM bank (CGB only)
@@ -33,7 +35,7 @@ pub fn init(gb: *Gbc) Bus {
     const timer = Timer.init(&gb.bus);
     const io = Io.init(&gb.bus);
 
-    return Bus{ .timer = timer, .io = io, .ppu = &gb.ppu };
+    return Bus{ .timer = timer, .io = io, .ppu = &gb.ppu, .dma = &gb.dma };
 }
 
 pub fn insertROM(self: *Bus, rom: []const u8) void {
