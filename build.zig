@@ -16,10 +16,16 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_module,
     });
 
+    exe.use_llvm = true;
+    exe.use_lld = true;
+
     const exe_check = b.addExecutable(.{
         .name = "GB_emulator",
         .root_module = exe_module,
     });
+
+    exe_check.use_llvm = true;
+    exe_check.use_lld = true;
 
     // ------------------------ Dependencies ------------------------
     const raylib_dep = b.dependency("raylib_zig", .{

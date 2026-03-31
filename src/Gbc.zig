@@ -107,7 +107,7 @@ pub fn run(self: *Gbc) !void {
 
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
-    std.debug.print("{any}\n", .{self.bus.OAM});
+    // std.debug.print("{any}\n", .{self.bus.OAM});
 
     self.ppu.debug_screen = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 });
     while (self.cycles_executed < CYCLES_PER_FRAME) {

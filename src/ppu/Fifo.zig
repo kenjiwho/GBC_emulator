@@ -20,7 +20,9 @@ pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8) error{Overflow}!
     }
 
     for (0..8) |i| {
-        const color_index: u2 = @intCast((tile_data_high >> @intCast(7 - i) & 0x1) << 1 | (tile_data_low >> @intCast(7 - i) & 0x1));
+        const pixel_low = (tile_data_low >> @intCast(7 - i)) & 0x1;
+        const pixel_high = (tile_data_high >> @intCast(7 - i)) & 0x1;
+        const color_index: u2 = @intCast((pixel_high) << 1 | pixel_low);
         const pixel = Pixel{
             .color_index = color_index,
             .palette = null,
@@ -29,6 +31,39 @@ pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8) error{Overflow}!
         self.buffer[self.tail] = pixel;
         self.tail = (self.tail + 1) % 8;
         self.count += 1;
+    }
+}
+
+// TODO: add pallette attribute
+/// Mixes row of 8 pixels with existing pixels in FIFO
+pub fn mix(self: *Fifo, tile_data_low: u8, tile_data_high: u8, x_flip: bool, priority: bool) void {
+    for (0..8) |i| {
+        const bit_idx: u3 = if (x_flip) @intCast(i) else @intCast(7 - i);
+
+        const pixel_low = (tile_data_low >> bit_idx) & 1;
+        const pixel_high = (tile_data_high >> bit_idx) & 1;
+        const color_index: u2 = @intCast((pixel_high << 1) | pixel_low);
+
+        const new_pixel = Pixel{
+            .color_index = color_index,
+            .palette = null,
+            .background_priority = priority,
+        };
+
+        if (i < self.count) {
+            // OVERLAP
+            const buffer_idx = (self.head + i) % 8;
+
+            // replace if existing pixel is transparent
+            if (self.buffer[buffer_idx].color_index == 0 and color_index != 0) {
+                self.buffer[buffer_idx] = new_pixel;
+            }
+        } else {
+            // APPEND
+            self.buffer[self.tail] = new_pixel;
+            self.tail = (self.tail + 1) % 8;
+            self.count += 1;
+        }
     }
 }
 

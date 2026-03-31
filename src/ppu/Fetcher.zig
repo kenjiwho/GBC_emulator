@@ -7,6 +7,7 @@ const Task = enum {
     get_tile,
     get_tile_data_low,
     get_tile_data_high,
+    sleep,
     push,
 };
 
@@ -25,6 +26,7 @@ pub fn init() Fetcher {
 pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
     switch (self.current_task) {
         .get_tile => {
+            self.current_task = .get_tile_data_low;
             self.tile_id = getTileId(self, ppu);
             return 2;
         },
@@ -50,16 +52,19 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             }
             return 2;
         },
+        .sleep => {
+            // do nothing
+            return 2;
+        },
         .push => {
             tryPush(self, ppu);
-            return 2;
+            return 1;
         },
     }
 }
 
 /// Determines which background/window tile to fetch pixels from
 fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
-    self.current_task = .get_tile_data_low;
     if (ppu.vram_blocked) {
         return 0xFF;
     }
@@ -92,7 +97,6 @@ fn tryPush(self: *Fetcher, ppu: *Ppu) void {
     self.fetcher_x += 8;
 }
 
-const std = @import("std");
 /// Converts a tile index to its corresponding address in VRAM
 fn tileIndexToAddress(self: *const Fetcher, ppu: *Ppu) u16 {
     const window_y = if (self.inside_window) self.wl_internal else 0;

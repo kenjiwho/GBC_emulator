@@ -17,6 +17,7 @@ pub const SCREEN_WIDTH: f32 = 160;
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color.black), // 144x160 pixels
 debug_screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 }), // 144x160 pixels
+// TODO: PROBLEMS WHEN UNINITIALIZED oam entry is looped over?
 oam_buffer: [10]OamEntry = undefined, // buffer for up to 10 sprites per scanline
 oam_count: u8 = 0, // number of sprites in the oam_buffer
 
@@ -177,9 +178,51 @@ fn oamScan(self: *Ppu) usize {
 }
 
 fn drawPixel(self: *Ppu) !void {
-    const pixel = try self.fifo_bg.pop();
+    if (self.lcdc.obj_enable) {
+        for (self.oam_buffer) |sprite| {
+            // std.debug.print("OAMENTRY: ", .{});
+            // std.debug.print("{any}\n", .{sprite});
+            if (self.lcd_x == sprite.x_position - 8) {
+                // Calculate which row of the sprite we are on
+                var line_y: u16 = self.ly + 16 - sprite.y_position;
 
-    const color = switch (pixel.color_index) {
+                // Handle Y-Flip (Bit 6)
+                if (sprite.attributes.y_flip) {
+                    const sprite_height: u16 = if (self.lcdc.obj_size == 1) 16 else 8;
+                    line_y = (sprite_height - 1) - line_y;
+                }
+
+                const bank = sprite.attributes.vram_bank;
+                const address = @as(u16, 0x8000) + sprite.tile_index * 16 + (line_y * 2);
+
+                const tile_data_low = self.readVram(bank, address);
+                const tile_data_high = self.readVram(bank, address + 1);
+
+                self.fifo_obj.mix(
+                    tile_data_low,
+                    tile_data_high,
+                    sprite.attributes.x_flip,
+                    sprite.attributes.priority,
+                );
+            }
+        }
+    }
+
+    const bg_pixel = try self.fifo_bg.pop();
+    var final_pixel = bg_pixel;
+
+    if (self.fifo_obj.count > 0) {
+        const obj_pixel = try self.fifo_obj.pop();
+
+        if (obj_pixel.color_index != 0) {
+            std.debug.print("OBJ PIXEL\n", .{});
+            if (!obj_pixel.background_priority or bg_pixel.color_index == 0) {
+                final_pixel = obj_pixel;
+            }
+        }
+    }
+
+    const color = switch (final_pixel.color_index) {
         0 => rl.Color.ray_white,
         1 => rl.Color.light_gray,
         2 => rl.Color.dark_gray,
