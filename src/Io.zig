@@ -19,7 +19,7 @@ const Interrupts = enum(u3) {
 const Key1 = packed struct {
     switch_armed: bool,
     _padding: u6,
-    current_speed: bool,
+    current_speed: bool, // 0 = normal speed, 1 = double speed
 };
 
 pub fn init(bus: *Bus) Io {

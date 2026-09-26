@@ -502,6 +502,7 @@ fn STOP(cpu: *Cpu) void {
         return;
     }
 
+    // speed switch requested
     if (pending_interrupts != 0) {
         if (cpu.IME) {
             cpu.bus.timer.write(0xFF04, 0x00); // reset DIV

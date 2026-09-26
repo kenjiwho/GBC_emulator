@@ -22,7 +22,6 @@ ppu: Ppu,
 bus: Bus, // memory-mapped I/O
 dma: Dma,
 screen_texture: rl.Texture2D = undefined,
-debug_texture: rl.Texture2D = undefined,
 device_mode: DeviceMode = .DMG, // default to DMG mode
 cycles_executed: usize = 0, // cycles executed in current frame
 
@@ -87,12 +86,6 @@ pub fn run(self: *Gbc) !void {
     defer rl.unloadTexture(self.screen_texture);
     rl.unloadImage(image);
 
-    // create an empty texture for the screen
-    const debug_image = rl.genImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.Color.black);
-    self.debug_texture = try rl.loadTextureFromImage(debug_image);
-    defer rl.unloadTexture(self.debug_texture);
-    rl.unloadImage(debug_image);
-
     var accumulator: f64 = 0; // accumulator for frame timing
 
     while (!rl.windowShouldClose()) {
@@ -107,9 +100,8 @@ pub fn run(self: *Gbc) !void {
 
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
-    // std.debug.print("{any}\n", .{self.bus.OAM});
+    std.debug.print("{any}\n", .{self.bus.OAM});
 
-    self.ppu.debug_screen = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 });
     while (self.cycles_executed < CYCLES_PER_FRAME) {
         if (self.dma.counter > 0) {
             self.dma.step();
@@ -140,7 +132,6 @@ fn render(self: *const Gbc) void {
 
     rl.clearBackground(rl.Color.black);
     rl.updateTexture(self.screen_texture, &self.ppu.screen);
-    rl.updateTexture(self.debug_texture, &self.ppu.debug_screen);
 
     const source_rect = rl.Rectangle{
         .x = 0,
@@ -157,7 +148,6 @@ fn render(self: *const Gbc) void {
     const origin = rl.Vector2{ .x = 0, .y = 0 };
 
     rl.drawTexturePro(self.screen_texture, source_rect, dest_rect, origin, 0, rl.Color.white);
-    rl.drawTexturePro(self.debug_texture, source_rect, dest_rect, origin, 0, rl.Color.white);
 
     rl.drawFPS(10, 10);
 }

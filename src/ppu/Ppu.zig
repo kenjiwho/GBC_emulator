@@ -16,7 +16,6 @@ pub const SCREEN_WIDTH: f32 = 160;
 
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color.black), // 144x160 pixels
-debug_screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color{ .r = 0, .g = 0, .b = 0, .a = 0 }), // 144x160 pixels
 // TODO: PROBLEMS WHEN UNINITIALIZED oam entry is looped over?
 oam_buffer: [10]OamEntry = undefined, // buffer for up to 10 sprites per scanline
 oam_count: u8 = 0, // number of sprites in the oam_buffer
@@ -62,11 +61,15 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     }
                     self.inside_window = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
+                    // std.debug.print("######################\n", .{});
+                    // std.debug.print("OAM BUFFER: {any}\n\n\n", .{self.oam_buffer});
+                    // std.debug.print("OAM: {any}\n", .{self.bus.OAM});
                 }
             },
             .drawing => {
                 const dots = self.fetcher.tick(self);
                 dots_used += dots;
+                self.total_dots += dots;
 
                 for (0..dots) |_| {
                     self.drawPixel() catch {
@@ -180,9 +183,9 @@ fn oamScan(self: *Ppu) usize {
 fn drawPixel(self: *Ppu) !void {
     if (self.lcdc.obj_enable) {
         for (self.oam_buffer) |sprite| {
-            // std.debug.print("OAMENTRY: ", .{});
-            // std.debug.print("{any}\n", .{sprite});
             if (self.lcd_x == sprite.x_position - 8) {
+                // std.debug.print("OAMENTRY: ", .{});
+                // std.debug.print("{any}\n", .{sprite});
                 // Calculate which row of the sprite we are on
                 var line_y: u16 = self.ly + 16 - sprite.y_position;
 
