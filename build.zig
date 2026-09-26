@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const exe = b.addExecutable(.{
-        .name = "GB_emulator",
+        .name = "GBC_emulator",
         .root_module = exe_module,
     });
 
@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     exe.use_lld = true;
 
     const exe_check = b.addExecutable(.{
-        .name = "GB_emulator",
+        .name = "GBC_emulator",
         .root_module = exe_module,
     });
 

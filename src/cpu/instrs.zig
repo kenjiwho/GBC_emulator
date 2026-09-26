@@ -559,7 +559,7 @@ fn HALT(cpu: *Cpu) void {
     } else {
         const IE = cpu.bus.IE;
         const IF = cpu.bus.io.getIF();
-        if ((IE & IF) == 0) {
+        if ((IE & IF & 0x1F) == 0) {
             cpu.halted = true;
         } else {
             cpu.HALT_bug = true;

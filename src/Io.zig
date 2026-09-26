@@ -76,7 +76,7 @@ pub fn getIF(self: *const Io) u8 {
 }
 
 pub fn setIF(self: *Io, value: u8) void {
-    self.IOPorts[0x0F] = value;
+    self.IOPorts[0x0F] = value & 0x1F;
 }
 
 pub fn getJoyp(self: *const Io) u8 {

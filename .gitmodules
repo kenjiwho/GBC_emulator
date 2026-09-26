@@ -1,3 +1,6 @@
 [submodule "tests/blargg_test"]
 	path = tests/blargg_test
 	url = https://github.com/retrio/gb-test-roms.git
+[submodule "tests/mealybug"]
+	path = tests/mealybug
+	url = https://github.com/mattcurrie/mealybug-tearoom-tests.git
