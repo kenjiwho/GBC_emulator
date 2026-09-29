@@ -18,11 +18,16 @@ pub fn main() !void {
     // var gbc = try Gbc.init(
     //     allocator,
     //     "./tests/mealybug/mealybug-tearoom-tests/m3_lcdc_bg_map_change.gb",
-    //     "./tests/dmg_boot.bin",
+    //     "./tests/gbc_bios.bin",
+    // );
+    // var gbc = try Gbc.init(
+    //     allocator,
+    //     "./tests/mealybug/mealybug-tearoom-tests/m2_win_en_toggle.gb",
+    //     "./tests/gbc_bios.bin",
     // );
     var gbc = try Gbc.init(
         allocator,
-        "./tests/mealybug/mealybug-tearoom-tests/m2_win_en_toggle.gb",
+        "./tests/cgb-acid2.gbc",
         "./tests/gbc_bios.bin",
     );
     // var gbc = try Gbc.init(allocator, "./tests/blargg_test/halt_bug.gb");
