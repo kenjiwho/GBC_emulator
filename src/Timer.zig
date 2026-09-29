@@ -26,18 +26,18 @@ pub fn tick(self: *Timer) void {
             self.reload_delay -= 1;
             if (self.reload_delay == 0) {
                 self.TIMA = self.TMA;
-                self.bus.io.requestInterrupt(.timer);
+                self.bus.io.request_interrupt(.timer);
             }
         }
 
         self.counter +%= 1;
         self.last_cycles_taken += 1;
 
-        self.timaIncrementCheck();
+        self.tima_increment_check();
     }
 }
 
-fn timaIncrementCheck(self: *Timer) void {
+fn tima_increment_check(self: *Timer) void {
     const TIMA_enabled = (self.TAC & 0b100) != 0;
     // the bit that determines when to increment TIMA
     const TIMA_bit: u4 = switch (self.TAC & 0b11) {
@@ -69,7 +69,7 @@ fn timaIncrementCheck(self: *Timer) void {
 }
 
 /// Return the amount of T_cycles taken since the last call, and reset the counter
-pub fn getLastCycles(self: *Timer) usize {
+pub fn get_last_cycles(self: *Timer) usize {
     const cycles = self.last_cycles_taken;
     self.last_cycles_taken = 0;
     return cycles;
@@ -90,7 +90,7 @@ pub fn write(self: *Timer, address: u16, value: u8) void {
         0xFF04 => { // writing to DIV resets it
             self.counter = 0;
             // resetting DIV can cause TIMA to increment
-            self.timaIncrementCheck();
+            self.tima_increment_check();
         },
         0xFF05 => {
             self.TIMA = value;
@@ -103,7 +103,7 @@ pub fn write(self: *Timer, address: u16, value: u8) void {
         0xFF07 => {
             self.TAC = value & 0b00000111; // unused bits always 0
             // updating TAC can cause TIMA to increment
-            self.timaIncrementCheck();
+            self.tima_increment_check();
         },
         else => unreachable,
     }

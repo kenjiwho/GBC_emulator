@@ -23,7 +23,7 @@ ppu: Ppu,
 bus: Bus, // memory-mapped I/O
 dma: Dma,
 screen_texture: rl.Texture2D = undefined,
-device_mode: DeviceMode = .DMG, // default to DMG mode
+device_mode: DeviceMode = undefined,
 cycles_executed: usize = 0, // cycles executed in current frame
 
 pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
@@ -172,6 +172,8 @@ fn setup_boot_state(self: *Gbc) void {
     self.bus.write(0xFF6B, 0x00); // OBPD
     self.bus.write(0xFF70, 0xF8); // SVBK
     self.bus.write(0xFFFF, 0x00); // IE
+
+    self.bus.boot_rom_enabled = false; // disable boot ROM after setup
 }
 
 pub fn run(self: *Gbc) !void {
@@ -231,11 +233,15 @@ fn step_frame(self: *Gbc) void {
             };
         }
 
-        const cycles = self.bus.timer.getLastCycles();
+        const cycles = self.bus.timer.get_last_cycles();
 
-        self.ppu.step(cycles);
+        // if double speed mode is enabled, each CPU cycle takes 2 system cycles
+        const is_double_speed = self.bus.io.getKey1().current_speed;
+        const system_cycles = if (is_double_speed) cycles / 2 else cycles;
 
-        self.cycles_executed += cycles;
+        self.ppu.step(system_cycles);
+
+        self.cycles_executed += system_cycles;
     }
 }
 

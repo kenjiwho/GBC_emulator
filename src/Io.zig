@@ -97,10 +97,10 @@ pub fn getKey1(self: *const Io) Key1 {
 }
 
 fn setKey1(self: *Io, value: u8) void {
-    self.IOPorts[0x4D] |= value & 0x1; // only write bit 0
+    self.IOPorts[0x4D] = (self.IOPorts[0x4D] & 0xFE) | (value & 0x1); // only write bit 0
 }
 
-pub fn requestInterrupt(self: *Io, interrupt: Interrupts) void {
+pub fn request_interrupt(self: *Io, interrupt: Interrupts) void {
     const interrupt_flag = self.IOPorts[0x0F];
     const new_flag = interrupt_flag | (@as(u8, 1) << @intFromEnum(interrupt));
     self.IOPorts[0x0F] = new_flag;

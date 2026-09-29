@@ -101,7 +101,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                         self.wy_trigger = false;
                         self.fetcher.wl_internal = 0;
                         // Trigger VBlank interrupt
-                        self.bus.io.requestInterrupt(.vblank);
+                        self.bus.io.request_interrupt(.vblank);
                     } else {
                         self.stat.ppu_mode = .oam_scan;
                         self.checkInterrupts();
@@ -162,7 +162,7 @@ fn checkInterrupts(self: *Ppu) void {
     const lyc_interrupt = self.stat.lyc_eq_ly and self.stat.lyc_interrupt;
 
     if (lyc_interrupt or mode_interrupt) {
-        self.bus.io.requestInterrupt(.stat);
+        self.bus.io.request_interrupt(.stat);
     }
 }
 

@@ -14,17 +14,17 @@ pub fn main() !void {
     // }
     // const rom = args[1];
 
-    // // var gbc = try Gbc.init(allocator, rom);
-    var gbc = try Gbc.init(
-        allocator,
-        "./tests/mealybug/mealybug-tearoom-tests/m3_lcdc_bg_map_change.gb",
-        "./tests/gbc_bios.bin",
-    );
+    // var gbc = try Gbc.init(allocator, rom);
     // var gbc = try Gbc.init(
     //     allocator,
-    //     "./tests/mealybug/mealybug-tearoom-tests/m2_win_en_toggle.gb",
-    //     "./tests/gbc_bios.bin",
+    //     "./tests/mealybug/mealybug-tearoom-tests/m3_lcdc_bg_map_change.gb",
+    //     "./tests/dmg_boot.bin",
     // );
+    var gbc = try Gbc.init(
+        allocator,
+        "./tests/mealybug/mealybug-tearoom-tests/m2_win_en_toggle.gb",
+        "./tests/gbc_bios.bin",
+    );
     // var gbc = try Gbc.init(allocator, "./tests/blargg_test/halt_bug.gb");
     // var gbc = try Gbc.init(allocator, "./tests/mooneye/call_cc_timing.gb");
     // var gbc = try Gbc.init(allocator, "./.roms/Tetris.gb");
