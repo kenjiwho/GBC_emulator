@@ -2,8 +2,7 @@
 const Fetcher = @This();
 
 const Ppu = @import("Ppu.zig");
-const ppu_structs = @import("ppu_structs.zig");
-const OamAttributes = ppu_structs.OamAttributes;
+const OamAttributes = @import("ppu_structs.zig").OamAttributes;
 
 const Task = enum {
     get_tile,
@@ -110,7 +109,7 @@ fn get_tile_id(self: *Fetcher, ppu: *Ppu) struct { u8, OamAttributes } {
 
 /// Attempts to push the fetched tile data into the background FIFO
 fn try_push(self: *Fetcher, ppu: *Ppu) bool {
-    ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high, self.tile_attributes.x_flip) catch {
+    ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high, self.tile_attributes) catch {
         return false;
     };
     self.fetcher_x += 8;

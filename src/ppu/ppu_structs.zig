@@ -28,7 +28,7 @@ pub const Stat = packed struct {
 
 pub const Pixel = struct {
     color_index: u2,
-    palette: ?u1,
+    palette: ?u3,
     background_priority: bool,
 };
 

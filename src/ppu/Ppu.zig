@@ -220,8 +220,7 @@ fn draw_pixel(self: *Ppu) !void {
                 self.fifo_obj.mix(
                     tile_data_low,
                     tile_data_high,
-                    sprite.attributes.x_flip,
-                    sprite.attributes.priority,
+                    sprite.attributes,
                 );
             }
         }
