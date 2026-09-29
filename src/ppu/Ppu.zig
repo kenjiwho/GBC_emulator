@@ -78,13 +78,13 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 self.total_dots += dots;
 
                 for (0..dots) |_| {
-                    self.drawPixel() catch {
+                    self.draw_pixel() catch {
                         break;
                     };
 
                     if (self.lcd_x >= 160) {
                         self.stat.ppu_mode = .hblank;
-                        self.checkInterrupts();
+                        self.check_interrupts();
                         break;
                     }
                 }
@@ -94,17 +94,17 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
                     // End of scanline
-                    self.resetLine();
+                    self.reset_line();
                     if (self.ly >= 144) {
                         self.stat.ppu_mode = .vblank;
-                        self.checkInterrupts();
+                        self.check_interrupts();
                         self.wy_trigger = false;
                         self.fetcher.wl_internal = 0;
                         // Trigger VBlank interrupt
                         self.bus.io.request_interrupt(.vblank);
                     } else {
                         self.stat.ppu_mode = .oam_scan;
-                        self.checkInterrupts();
+                        self.check_interrupts();
                     }
                 }
             },
@@ -114,7 +114,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 if (self.total_dots >= 456) {
                     // End of scanline
                     self.total_dots = 0;
-                    self.incrementLy();
+                    self.increment_ly();
                     if (self.ly > 153) {
                         self.ly = 0;
                         self.stat.ppu_mode = .oam_scan;
@@ -127,9 +127,9 @@ pub fn step(self: *Ppu, cycles: usize) void {
 }
 
 /// Prepares PPU, FIFO, and Fetcher for the next scanline
-pub fn resetLine(self: *Ppu) void {
+pub fn reset_line(self: *Ppu) void {
     self.total_dots = 0;
-    self.incrementLy();
+    self.increment_ly();
     self.lcd_x = 0;
     self.oam_count = 0;
     self.fifo_bg.clear();
@@ -144,13 +144,13 @@ pub fn resetLine(self: *Ppu) void {
     self.inside_window = false;
 }
 
-fn incrementLy(self: *Ppu) void {
+fn increment_ly(self: *Ppu) void {
     self.ly += 1;
     self.stat.lyc_eq_ly = self.ly == self.lyc;
-    self.checkInterrupts();
+    self.check_interrupts();
 }
 
-fn checkInterrupts(self: *Ppu) void {
+fn check_interrupts(self: *Ppu) void {
     // Mode interrupts
     const mode_interrupt = switch (self.stat.ppu_mode) {
         .hblank => self.stat.mode0_interrupt,
@@ -188,7 +188,7 @@ fn oamScan(self: *Ppu) usize {
     return 2;
 }
 
-fn drawPixel(self: *Ppu) !void {
+fn draw_pixel(self: *Ppu) !void {
     if (self.lcdc.obj_enable) {
         for (self.oam_buffer[0..self.oam_count]) |sprite| {
             if (self.lcd_x == sprite.x_position - 8) {
@@ -302,7 +302,7 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
         0xFF44 => {}, // LY is read-only
         0xFF45 => {
             self.lyc = value;
-            self.checkInterrupts();
+            self.check_interrupts();
         },
         0xFF46 => self.bus.dma.startTransfer(value), // enable OAM DMA transfer mode
         0xFF4A => self.wy = value,
