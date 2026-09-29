@@ -37,27 +37,33 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             } else {
                 const address = self.tileIndexToAddress(ppu);
 
-                self.tile_data_low = ppu.readVram(0, address);
+                self.tile_data_low = ppu.readVram(ppu.bus.vbk, address);
             }
             return 2;
         },
         .get_tile_data_high => {
-            self.current_task = .push;
+            self.current_task = .sleep;
             if (ppu.vram_blocked) {
                 self.tile_data_high = 0xFF;
             } else {
                 const address = self.tileIndexToAddress(ppu) + 1;
 
-                self.tile_data_high = ppu.readVram(0, address);
+                self.tile_data_high = ppu.readVram(ppu.bus.vbk, address);
             }
+
+            // The high-plane phase is also a push opportunity.
+            _ = tryPush(self, ppu);
             return 2;
         },
         .sleep => {
             // do nothing
+            self.current_task = .push;
             return 2;
         },
         .push => {
-            tryPush(self, ppu);
+            if (tryPush(self, ppu)) {
+                self.current_task = .get_tile;
+            }
             return 1;
         },
     }
@@ -79,22 +85,31 @@ fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
     const window_y = if (self.inside_window) self.wl_internal else 0;
 
     const base = 0x9800;
+    // 0x9800: 0b1001100000000000
+    // 0x9C00: 0b1001110000000000
+    // bit 10 determines which base address to use for the tile map
     const bit10 = if (self.inside_window) ppu.lcdc.window_tile_map_area else ppu.lcdc.bg_tile_map_area;
-    // >> 3 is the same as /8
-    const map_y = if (self.inside_window) window_y >> 3 else (ppu.ly +% ppu.scy) >> 3;
-    const map_x = if (self.inside_window) self.fetcher_x >> 3 else (self.fetcher_x +% ppu.scx) >> 3;
 
+    // >> 3 is the same as /8
+    // calculate the tile map coordinates based on the current fetcher position and scroll/window position
+    const map_y = if (self.inside_window) window_y >> 3 else (ppu.ly +% ppu.scy) >> 3;
+    const map_x = if (self.inside_window)
+        (self.fetcher_x >> 3) & 0x1F
+    else
+        ((self.fetcher_x +% ppu.scx) >> 3) & 0x1F;
+
+    // calculate the address of the tile ID in VRAM based on the tile map coordinates and base address
     const address = base | (@as(u16, bit10) << 10) | (@as(u16, map_y) << 5) | @as(u16, map_x);
     return ppu.readVram(0, address);
 }
 
 /// Attempts to push the fetched tile data into the background FIFO
-fn tryPush(self: *Fetcher, ppu: *Ppu) void {
+fn tryPush(self: *Fetcher, ppu: *Ppu) bool {
     ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high) catch {
-        return;
+        return false;
     };
-    self.current_task = .get_tile;
     self.fetcher_x += 8;
+    return true;
 }
 
 /// Converts a tile index to its corresponding address in VRAM

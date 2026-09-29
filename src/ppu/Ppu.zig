@@ -51,7 +51,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
 
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
-            .oam_scan => {
+            .oam_scan => { // 80 dots
                 const dots = self.oamScan();
                 dots_used += dots;
                 self.total_dots += dots;
@@ -62,12 +62,18 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     self.inside_window = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
                     // std.debug.print("######################\n", .{});
-                    // std.debug.print("OAM BUFFER: {any}\n\n\n", .{self.oam_buffer});
+                    // std.debug.print("OAM BUFFER: {any}\n\n\n", .{self.oam_buffer[0..self.oam_count]});
                     // std.debug.print("OAM: {any}\n", .{self.bus.OAM});
                 }
             },
-            .drawing => {
+            .drawing => { // 172 - 289 dots
                 const dots = self.fetcher.tick(self);
+                // if (self.ly == 0) {
+                //     std.debug.print(
+                //         "LY={d} task={any} lcd_x={d} fifo={d}\n",
+                //         .{ self.ly, self.fetcher.current_task, self.lcd_x, self.fifo_bg.count },
+                //     );
+                // }
                 dots_used += dots;
                 self.total_dots += dots;
 
@@ -83,7 +89,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     }
                 }
             },
-            .hblank => {
+            .hblank => { // 87 - 204 dots
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
@@ -102,7 +108,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     }
                 }
             },
-            .vblank => {
+            .vblank => { // 4560 dots (10 scanlines)
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {
@@ -125,7 +131,9 @@ pub fn resetLine(self: *Ppu) void {
     self.total_dots = 0;
     self.incrementLy();
     self.lcd_x = 0;
+    self.oam_count = 0;
     self.fifo_bg.clear();
+    self.fifo_obj.clear();
     self.fetcher.current_task = .get_tile;
     self.fetcher.fetcher_x = 0;
     // increment window line internal counter once if inside window
@@ -182,7 +190,7 @@ fn oamScan(self: *Ppu) usize {
 
 fn drawPixel(self: *Ppu) !void {
     if (self.lcdc.obj_enable) {
-        for (self.oam_buffer) |sprite| {
+        for (self.oam_buffer[0..self.oam_count]) |sprite| {
             if (self.lcd_x == sprite.x_position - 8) {
                 // std.debug.print("OAMENTRY: ", .{});
                 // std.debug.print("{any}\n", .{sprite});
@@ -201,6 +209,10 @@ fn drawPixel(self: *Ppu) !void {
                 const tile_data_low = self.readVram(bank, address);
                 const tile_data_high = self.readVram(bank, address + 1);
 
+                // std.debug.print("address: {any} {any}\n", .{ address, address + 1 });
+                // std.debug.print("tile_data: {any} {any}\n", .{ tile_data_low, tile_data_high });
+                // std.debug.print("vram: {any}\n", .{self.VRAM});
+
                 self.fifo_obj.mix(
                     tile_data_low,
                     tile_data_high,
@@ -215,6 +227,7 @@ fn drawPixel(self: *Ppu) !void {
     var final_pixel = bg_pixel;
 
     if (self.fifo_obj.count > 0) {
+        // std.debug.print("{any}: {any}\n", .{ self.lcd_x, self.fifo_obj.buffer });
         const obj_pixel = try self.fifo_obj.pop();
 
         if (obj_pixel.color_index != 0) {
@@ -241,6 +254,12 @@ pub fn readVram(self: *const Ppu, bank: u1, address: u16) u8 {
 }
 
 pub fn writeVram(self: *Ppu, bank: u1, address: u16, value: u8) void {
+    // if (self.bus.boot_rom_enabled and address >= 0x8000 and address < 0x8020) {
+    //     std.debug.print(
+    //         "boot VRAM bank={d} address=${X} value=${X}\n",
+    //         .{ bank, address, value },
+    //     );
+    // }
     self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)] = value;
 }
 
@@ -265,11 +284,10 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
     switch (address) {
         0xFF40 => {
             const lcdc: Lcdc = @bitCast(value);
-
-            if (lcdc.bg_tile_map_area != self.lcdc.bg_tile_map_area) {
-                std.debug.print("LCDC BG MAP WRITTEN: {any}\n", .{lcdc.bg_tile_map_area});
-            }
-
+            // std.debug.print(
+            //     "LCDC=${X} LY={d} mode={d}\n",
+            //     .{ value, self.ly, @intFromEnum(self.stat.ppu_mode) },
+            // );
             self.lcdc = lcdc;
         },
         0xFF41 => {

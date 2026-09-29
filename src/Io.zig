@@ -29,12 +29,6 @@ pub fn init(bus: *Bus) Io {
 }
 
 pub fn read(self: *const Io, address: u16) u8 {
-    // --------------------- USED IN BLARGG TESTING ---------------------
-    if (address == 0xFF44) {
-        return 0x90;
-    }
-    // ----------------------------------------------------------------------
-
     return switch (address) {
         0xFF00 => self.getJoyp(),
         0xFF04...0xFF07 => self.bus.timer.read(address),
@@ -64,6 +58,10 @@ pub fn write(self: *Io, address: u16, value: u8) void {
         0xFF40...0xFF4B => self.bus.ppu.write(address, value),
         0xFF4D => self.setKey1(value),
         0xFF4F => self.bus.vbk = @intCast(value & 0b1),
+        0xFF50 => {
+            std.debug.print("Disabling boot rom\n", .{});
+            self.bus.boot_rom_enabled = false;
+        }, // disable boot rom
         0xFF70 => self.bus.wbk = @min(value & 0b111, 1),
         else => self.IOPorts[address - 0xFF00] = value,
     }

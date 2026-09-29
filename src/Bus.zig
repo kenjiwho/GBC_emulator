@@ -9,6 +9,8 @@ const Gbc = @import("Gbc.zig");
 const Ppu = @import("ppu/Ppu.zig");
 const Dma = @import("Dma.zig");
 
+boot_ROM: []const u8 = undefined, // optional GBC boot rom
+
 // Memory Map
 ROM: []const u8 = undefined, // 16KiB ROM bank 00 (0000-3FFF) + switchable bank 01-NN (4000-7FFF)
 // 8KiB Video RAM switchable 0/1: 8000-9FFF
@@ -30,6 +32,7 @@ dma: *Dma = undefined,
 
 vbk: u1 = 0, // Current VRAM bank (CGB only)
 wbk: u3 = 1, // Current WRAM bank (CGB only)
+boot_rom_enabled: bool = true,
 
 pub fn init(gb: *Gbc) Bus {
     const timer = Timer.init(&gb.bus);
@@ -38,7 +41,7 @@ pub fn init(gb: *Gbc) Bus {
     return Bus{ .timer = timer, .io = io, .ppu = &gb.ppu, .dma = &gb.dma };
 }
 
-pub fn insertROM(self: *Bus, rom: []const u8) void {
+pub fn insert_rom(self: *Bus, rom: []const u8) void {
     self.ROM = rom;
 
     // setup mbc based on rom header
@@ -47,8 +50,25 @@ pub fn insertROM(self: *Bus, rom: []const u8) void {
     self.mbc = Mbc.init(cartridge_type, rom_size_code);
 }
 
+pub fn insert_boot_rom(self: *Bus, boot_rom: []const u8) void {
+    self.boot_ROM = boot_rom;
+}
+
+const std = @import("std");
 pub fn read(self: *Bus, address: u16) u8 {
     self.timer.tick(); // advance timer on each read
+
+    if (self.boot_rom_enabled) {
+        if (address <= 0x00FF) {
+            // std.debug.print("Reading from boot rom: {x}\n", .{address});
+            return self.boot_ROM[address]; // First 256 bytes
+        } else if (address >= 0x0100 and address <= 0x014F) {
+            return self.ROM[address]; // Read from the game cartridge header
+        } else if (address >= 0x0200 and address <= 0x08FF) {
+            // std.debug.print("Reading from boot rom: {x}\n", .{address});
+            return self.boot_ROM[address]; // second mapped region of CGB boot ROM
+        }
+    }
 
     return switch (address) {
         0x0000...0x3FFF => self.ROM[address],
