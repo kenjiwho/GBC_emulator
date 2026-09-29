@@ -205,8 +205,6 @@ fn draw_pixel(self: *Ppu) !void {
     if (self.lcdc.obj_enable) {
         for (self.oam_buffer[0..self.oam_count]) |sprite| {
             if (self.lcd_x == @as(i32, sprite.x_position) - 8) {
-                // std.debug.print("OAMENTRY: ", .{});
-                // std.debug.print("{any}\n", .{sprite});
                 // Calculate which row of the sprite we are on
                 var line_y: u16 = self.ly + 16 - sprite.y_position;
 
@@ -221,10 +219,6 @@ fn draw_pixel(self: *Ppu) !void {
 
                 const tile_data_low = self.read_vram(bank, address);
                 const tile_data_high = self.read_vram(bank, address + 1);
-
-                // std.debug.print("address: {any} {any}\n", .{ address, address + 1 });
-                // std.debug.print("tile_data: {any} {any}\n", .{ tile_data_low, tile_data_high });
-                // std.debug.print("vram: {any}\n", .{self.VRAM});
 
                 self.fifo_obj.mix(
                     tile_data_low,
