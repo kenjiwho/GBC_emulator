@@ -32,7 +32,7 @@ pub const Pixel = struct {
     background_priority: bool,
 };
 
-const OamAttributes = packed struct {
+pub const OamAttributes = packed struct {
     cgb_palette: u3 = 0, // 0-2
     vram_bank: u1 = 0, // 3
     dmg_palette: u1 = 0, // 4

@@ -2,6 +2,8 @@
 const Fetcher = @This();
 
 const Ppu = @import("Ppu.zig");
+const ppu_structs = @import("ppu_structs.zig");
+const OamAttributes = ppu_structs.OamAttributes;
 
 const Task = enum {
     get_tile,
@@ -15,6 +17,7 @@ current_task: Task = .get_tile,
 fetcher_x: u8 = 0, // current x position of the fetcher in pixels
 wl_internal: u8 = 0, // internal window line counter
 tile_id: u8 = 0,
+tile_attributes: OamAttributes = OamAttributes{},
 tile_data_low: u8 = 0,
 tile_data_high: u8 = 0,
 inside_window: bool = false, // whether the fetcher is currently fetching window tiles
@@ -27,7 +30,7 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
     switch (self.current_task) {
         .get_tile => {
             self.current_task = .get_tile_data_low;
-            self.tile_id = getTileId(self, ppu);
+            self.tile_id, self.tile_attributes = getTileId(self, ppu);
             return 2;
         },
         .get_tile_data_low => {
@@ -37,7 +40,8 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             } else {
                 const address = self.tileIndexToAddress(ppu);
 
-                self.tile_data_low = ppu.readVram(ppu.bus.vbk, address);
+                // TODO: handle vertical flip
+                self.tile_data_low = ppu.readVram(self.tile_attributes.vram_bank, address);
             }
             return 2;
         },
@@ -48,7 +52,8 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             } else {
                 const address = self.tileIndexToAddress(ppu) + 1;
 
-                self.tile_data_high = ppu.readVram(ppu.bus.vbk, address);
+                // TODO: handle vertical flip
+                self.tile_data_high = ppu.readVram(self.tile_attributes.vram_bank, address);
             }
 
             // The high-plane phase is also a push opportunity.
@@ -70,9 +75,9 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
 }
 
 /// Determines which background/window tile to fetch pixels from
-fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
+fn getTileId(self: *Fetcher, ppu: *Ppu) struct { u8, OamAttributes } {
     if (ppu.vram_blocked) {
-        return 0xFF;
+        return .{ 0xFF, OamAttributes{} };
     }
 
     if (!self.inside_window) {
@@ -100,7 +105,7 @@ fn getTileId(self: *Fetcher, ppu: *Ppu) u8 {
 
     // calculate the address of the tile ID in VRAM based on the tile map coordinates and base address
     const address = base | (@as(u16, bit10) << 10) | (@as(u16, map_y) << 5) | @as(u16, map_x);
-    return ppu.readVram(0, address);
+    return .{ ppu.readVram(0, address), @bitCast(ppu.readVram(1, address)) };
 }
 
 /// Attempts to push the fetched tile data into the background FIFO
@@ -117,9 +122,15 @@ fn tileIndexToAddress(self: *const Fetcher, ppu: *Ppu) u16 {
     const window_y = if (self.inside_window) self.wl_internal else 0;
 
     const base = 0x8000;
+    // 0x8000: 0b1000000000000000
+    // 0x9000: 0b1001000000000000
+    // bit 12 determines which base address to use for the tile data
     const bit12 = if (ppu.lcdc.bg_window_tile_data_area == 1) 0 else (~self.tile_id >> 7);
+
+    // calculate the row offset within the tile based on the current fetcher position and scroll/window position
     const row_offset = if (self.inside_window) window_y % 8 else (ppu.ly +% ppu.scy) % 8;
 
+    // calculate the address of the tile data in VRAM based on the tile index, base address, and row offset
     const address = base | (@as(u16, bit12) << 12) | (@as(u16, self.tile_id & 0x7F) << 4) | (@as(u16, row_offset) << 1);
 
     return address;

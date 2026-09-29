@@ -35,7 +35,7 @@ pub fn read(self: *const Io, address: u16) u8 {
         0xFF0F => self.getIF(),
         0xFF40...0xFF4B => self.bus.ppu.read(address),
         0xFF4D => self.IOPorts[0x4D], // KEY1
-        0xFF4F => self.bus.vbk,
+        0xFF4F => @as(u8, self.bus.vbk) | 0xFE, // VBK (bit 0) + unused bits read as 1
         0xFF70 => self.bus.wbk,
         else => self.IOPorts[address - 0xFF00],
     };
