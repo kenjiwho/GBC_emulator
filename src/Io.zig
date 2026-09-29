@@ -33,7 +33,7 @@ pub fn read(self: *const Io, address: u16) u8 {
         0xFF00 => self.getJoyp(),
         0xFF04...0xFF07 => self.bus.timer.read(address),
         0xFF0F => self.getIF(),
-        0xFF40...0xFF4B => self.bus.ppu.read(address),
+        0xFF40...0xFF4B, 0xFF68...0xFF6B => self.bus.ppu.read(address),
         0xFF4D => self.IOPorts[0x4D], // KEY1
         0xFF4F => @as(u8, self.bus.vbk) | 0xFE, // VBK (bit 0) + unused bits read as 1
         0xFF70 => self.bus.wbk,

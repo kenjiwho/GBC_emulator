@@ -34,26 +34,18 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
         },
         .get_tile_data_low => {
             self.current_task = .get_tile_data_high;
-            if (ppu.vram_blocked) {
-                self.tile_data_low = 0xFF;
-            } else {
-                const address = self.tile_index_to_address(ppu);
+            const address = self.tile_index_to_address(ppu);
 
-                // TODO: handle vertical flip
-                self.tile_data_low = ppu.readVram(self.tile_attributes.vram_bank, address);
-            }
+            // TODO: handle vertical flip
+            self.tile_data_low = ppu.read_vram(self.tile_attributes.vram_bank, address);
             return 2;
         },
         .get_tile_data_high => {
             self.current_task = .sleep;
-            if (ppu.vram_blocked) {
-                self.tile_data_high = 0xFF;
-            } else {
-                const address = self.tile_index_to_address(ppu) + 1;
+            const address = self.tile_index_to_address(ppu) + 1;
 
-                // TODO: handle vertical flip
-                self.tile_data_high = ppu.readVram(self.tile_attributes.vram_bank, address);
-            }
+            // TODO: handle vertical flip
+            self.tile_data_high = ppu.read_vram(self.tile_attributes.vram_bank, address);
 
             // The high-plane phase is also a push opportunity.
             _ = try_push(self, ppu);
@@ -75,10 +67,6 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
 
 /// Determines which background/window tile to fetch pixels from
 fn get_tile_id(self: *Fetcher, ppu: *Ppu) struct { u8, OamAttributes } {
-    if (ppu.vram_blocked) {
-        return .{ 0xFF, OamAttributes{} };
-    }
-
     if (!self.inside_window) {
         self.inside_window = ppu.inside_window and (self.fetcher_x + 7 >= ppu.wx);
         if (self.inside_window) {
@@ -104,7 +92,7 @@ fn get_tile_id(self: *Fetcher, ppu: *Ppu) struct { u8, OamAttributes } {
 
     // calculate the address of the tile ID in VRAM based on the tile map coordinates and base address
     const address = base | (@as(u16, bit10) << 10) | (@as(u16, map_y) << 5) | @as(u16, map_x);
-    return .{ ppu.readVram(0, address), @bitCast(ppu.readVram(1, address)) };
+    return .{ ppu.read_vram(0, address), @bitCast(ppu.read_vram(1, address)) };
 }
 
 /// Attempts to push the fetched tile data into the background FIFO

@@ -47,3 +47,15 @@ pub const OamEntry = packed struct {
     tile_index: u8 = 0, // byte 2
     attributes: OamAttributes = OamAttributes{}, // byte 3
 };
+
+pub const Bgpi = packed struct {
+    address: u6 = 0, // 0-5
+    _padding: u1 = 0,
+    auto_increment: bool = false, // 6
+};
+
+pub const Obpi = packed struct {
+    address: u6 = 0, // 0-5
+    _padding: u1 = 0,
+    auto_increment: bool = false, // 6
+};

@@ -10,15 +10,23 @@ const ppu_structs = @import("ppu_structs.zig");
 const Lcdc = ppu_structs.Lcdc;
 const Stat = ppu_structs.Stat;
 const OamEntry = ppu_structs.OamEntry;
+const Bgpi = ppu_structs.Bgpi;
+const Obpi = ppu_structs.Obpi;
 
 pub const SCREEN_HEIGHT: f32 = 144;
 pub const SCREEN_WIDTH: f32 = 160;
 
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
+OAM: [0xA0]u8 = @splat(0), // Object Attribute Memory (OAM): FE00-FE9F
 screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color.black), // 144x160 pixels
 // TODO: PROBLEMS WHEN UNINITIALIZED oam entry is looped over?
 oam_buffer: [10]OamEntry = undefined, // buffer for up to 10 sprites per scanline
 oam_count: u8 = 0, // number of sprites in the oam_buffer
+
+bg_CRAM: [64]u8 = @splat(0), // 64 bytes of background Color RAM
+obj_CRAM: [64]u8 = @splat(0), // 64 bytes of object Color RAM
+bgpi: Bgpi = Bgpi{}, // background palette index
+obpi: Obpi = Obpi{}, // object palette index
 
 // registers
 lcdc: Lcdc = Lcdc{},
@@ -48,6 +56,7 @@ pub fn init(bus: *Bus) Ppu {
 
 const std = @import("std");
 pub fn step(self: *Ppu, cycles: usize) void {
+    if (!self.lcdc.lcd_ppu_enable) return; // PPU does not run when LCD is disabled
     var dots_used: usize = 0;
 
     while (dots_used < cycles) {
@@ -64,7 +73,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     self.stat.ppu_mode = .drawing;
                     // std.debug.print("######################\n", .{});
                     // std.debug.print("OAM BUFFER: {any}\n\n\n", .{self.oam_buffer[0..self.oam_count]});
-                    // std.debug.print("OAM: {any}\n", .{self.bus.OAM});
+                    // std.debug.print("OAM: {any}\n", .{self.OAM});
                 }
             },
             .drawing => { // 172 - 289 dots
@@ -173,10 +182,10 @@ fn oam_scan(self: *Ppu) usize {
 
     const offset = self.total_dots / 2;
     const entry = OamEntry{
-        .y_position = self.bus.OAM[offset * 4 + 0],
-        .x_position = self.bus.OAM[offset * 4 + 1],
-        .tile_index = self.bus.OAM[offset * 4 + 2],
-        .attributes = @bitCast(self.bus.OAM[offset * 4 + 3]),
+        .y_position = self.OAM[offset * 4 + 0],
+        .x_position = self.OAM[offset * 4 + 1],
+        .tile_index = self.OAM[offset * 4 + 2],
+        .attributes = @bitCast(self.OAM[offset * 4 + 3]),
     };
 
     const obj_height: u8 = if (self.lcdc.obj_size == 1) 16 else 8;
@@ -210,8 +219,8 @@ fn draw_pixel(self: *Ppu) !void {
                 const bank = sprite.attributes.vram_bank;
                 const address = @as(u16, 0x8000) + sprite.tile_index * 16 + (line_y * 2);
 
-                const tile_data_low = self.readVram(bank, address);
-                const tile_data_high = self.readVram(bank, address + 1);
+                const tile_data_low = self.read_vram(bank, address);
+                const tile_data_high = self.read_vram(bank, address + 1);
 
                 // std.debug.print("address: {any} {any}\n", .{ address, address + 1 });
                 // std.debug.print("tile_data: {any} {any}\n", .{ tile_data_low, tile_data_high });
@@ -251,23 +260,104 @@ fn draw_pixel(self: *Ppu) !void {
     self.lcd_x += 1;
 }
 
+// ==================== PPU access ====================
+// always accessible
 // VRAM read/write
-pub fn readVram(self: *const Ppu, bank: u1, address: u16) u8 {
+pub fn read_vram(self: *const Ppu, bank: u1, address: u16) u8 {
     return self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)];
 }
 
-pub fn writeVram(self: *Ppu, bank: u1, address: u16, value: u8) void {
-    // if (self.bus.boot_rom_enabled and address >= 0x8000 and address < 0x8020) {
-    //     std.debug.print(
-    //         "boot VRAM bank={d} address=${X} value=${X}\n",
-    //         .{ bank, address, value },
-    //     );
-    // }
+pub fn write_vram(self: *Ppu, bank: u1, address: u16, value: u8) void {
     self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)] = value;
 }
 
-// Memory-mapped I/O read/write
+// OAM read/write
+pub fn read_oam(self: *const Ppu, address: u16) u8 {
+    return self.OAM[address - 0xFE00];
+}
 
+pub fn write_oam(self: *Ppu, address: u16, value: u8) void {
+    self.OAM[address - 0xFE00] = value;
+}
+
+// CRAM read/write
+pub fn read_cram(self: *const Ppu, address: u16) u8 {
+    if (address == 0xFF69) return self.bg_CRAM[self.bgpi.address]
+    else if (address == 0xFF6B) return self.obj_CRAM[self.obpi.address]
+    else unreachable;
+}
+
+pub fn write_cram(self: *Ppu, address: u16, value: u8) void {
+    if (address == 0xFF69) {
+        self.bg_CRAM[self.bgpi.address] = value;
+        if (self.bgpi.auto_increment) {
+            self.bgpi.address +%= 1;
+        }
+    } else if (address == 0xFF6B) {
+        self.obj_CRAM[self.obpi.address] = value;
+        if (self.obpi.auto_increment) {
+            self.obpi.address +%= 1;
+        }
+    } else unreachable;
+}
+// ====================================================
+
+// ==================== CPU access ====================
+// not accessible for some modes
+// VRAM read/write
+// VRAM not accessible during mode 3 (drawing)
+pub fn read_vram_cpu(self: *const Ppu, bank: u1, address: u16) u8 {
+    // return 0xFF if VRAM is not accessible
+    return if (self.stat.ppu_mode == .drawing) 0xFF else self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)];
+}
+
+pub fn write_vram_cpu(self: *Ppu, bank: u1, address: u16, value: u8) void {
+    // ignore writes if VRAM is not accessible
+    if (self.stat.ppu_mode == .drawing) return;
+    self.VRAM[address - 0x8000 + (@as(u16, bank) * 0x2000)] = value;
+}
+
+// OAM read/write
+// OAM not accessible during mode 2 and 3 (drawing)
+pub fn read_oam_cpu(self: *const Ppu, address: u16) u8 {
+    // return 0xFF if VRAM is not accessible
+    return if (self.stat.ppu_mode == .drawing or self.stat.ppu_mode == .oam_scan) 0xFF else self.OAM[address - 0xFE00];
+}
+
+pub fn write_oam_cpu(self: *Ppu, address: u16, value: u8) void {
+    // ignore writes if OAM is not accessible
+    if (self.stat.ppu_mode == .drawing or self.stat.ppu_mode == .oam_scan) return;
+    self.OAM[address - 0xFE00] = value;
+}
+
+// CRAM read/write
+// CRAM not accessible during mode 3 (drawing)
+pub fn read_cram_cpu(self: *const Ppu, address: u16) u8 {
+    // return 0xFF if CRAM is not accessible
+    if (self.stat.ppu_mode == .drawing) return 0xFF;
+    if (address == 0xFF69) return self.bg_CRAM[self.bgpi.address]
+    else if (address == 0xFF6B) return self.obj_CRAM[self.obpi.address]
+    else unreachable;
+}
+
+pub fn write_cram_cpu(self: *Ppu, address: u16, value: u8) void {
+    // ignore writes if CRAM is not accessible
+    if (self.stat.ppu_mode == .drawing) return;
+    if (address == 0xFF69) {
+        self.bg_CRAM[self.bgpi.address] = value;
+        if (self.bgpi.auto_increment) {
+            self.bgpi.address +%= 1;
+        }
+    } else if (address == 0xFF6B) {
+        self.obj_CRAM[self.obpi.address] = value;
+        if (self.obpi.auto_increment) {
+            self.obpi.address +%= 1;
+        }
+    } else unreachable;
+}
+// ====================================================
+
+// Memory-mapped I/O read/write
 pub fn read(self: *const Ppu, address: u16) u8 {
     return switch (address) {
         0xFF40 => @bitCast(self.lcdc),
@@ -279,6 +369,9 @@ pub fn read(self: *const Ppu, address: u16) u8 {
         0xFF46 => 0, // OAM DMA is write-only
         0xFF4A => self.wy,
         0xFF4B => self.wx,
+        0xFF68 => @bitCast(self.bgpi),
+        0xFF6A => @bitCast(self.obpi),
+        0xFF69, 0xFF6B => self.read_cram_cpu(address),
         else => 0,
     };
 }
@@ -286,12 +379,14 @@ pub fn read(self: *const Ppu, address: u16) u8 {
 pub fn write(self: *Ppu, address: u16, value: u8) void {
     switch (address) {
         0xFF40 => {
-            const lcdc: Lcdc = @bitCast(value);
-            // std.debug.print(
-            //     "LCDC=${X} LY={d} mode={d}\n",
-            //     .{ value, self.ly, @intFromEnum(self.stat.ppu_mode) },
-            // );
-            self.lcdc = lcdc;
+            const new_lcdc: Lcdc = @bitCast(value);
+            if (self.lcdc.lcd_ppu_enable and !new_lcdc.lcd_ppu_enable) {
+                // LCD is turning off: reset ppu state
+                self.ly = 0;
+                self.total_dots = 0;
+                self.stat.ppu_mode = .hblank; // Mode 0
+            }
+            self.lcdc = new_lcdc;
         },
         0xFF41 => {
             var new_stat: ppu_structs.Stat = @bitCast(value);
@@ -310,6 +405,9 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
         0xFF46 => self.bus.dma.startTransfer(value), // enable OAM DMA transfer mode
         0xFF4A => self.wy = value,
         0xFF4B => self.wx = value,
+        0xFF68 => self.bgpi = @bitCast(value),
+        0xFF6A => self.obpi = @bitCast(value),
+        0xFF69, 0xFF6B => self.write_cram_cpu(address, value),
         else => {},
     }
 }

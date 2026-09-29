@@ -34,7 +34,7 @@ pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
     const bus = Bus.init(gbc);
     const cpu = Cpu.init(&gbc.bus);
     const ppu = Ppu.init(&gbc.bus);
-    const dma = Dma.init(&gbc.bus);
+    const dma = Dma.init(&gbc.bus, &gbc.ppu);
 
     gbc.* = Gbc{
         .cpu = cpu,
@@ -200,6 +200,8 @@ pub fn run(self: *Gbc) !void {
 
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
+    var frame_cycles: usize = 0;
+
     while (!self.ppu.frame_complete) {
         if (self.dma.counter > 0) {
             self.dma.step();
@@ -239,6 +241,12 @@ fn step_frame(self: *Gbc) void {
         const system_cycles = if (is_double_speed) cycles / 2 else cycles;
 
         self.ppu.step(system_cycles);
+        frame_cycles += system_cycles;
+
+        // if lcd is disabled, wait for 70224 cycles before breaking
+        if (!self.ppu.lcdc.lcd_ppu_enable and frame_cycles >= CYCLES_PER_FRAME) {
+            break;
+        }
     }
     self.ppu.frame_complete = false;
 }
