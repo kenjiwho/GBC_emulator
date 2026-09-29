@@ -55,7 +55,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
         0xFF00 => self.setJoyp(value),
         0xFF04...0xFF07 => self.bus.timer.write(address, value),
         0xFF0F => self.setIF(value),
-        0xFF40...0xFF4B => self.bus.ppu.write(address, value),
+        0xFF40...0xFF4B, 0xFF68...0xFF6B => self.bus.ppu.write(address, value),
         0xFF4D => self.setKey1(value),
         0xFF4F => self.bus.vbk = @intCast(value & 0b1),
         0xFF50 => {

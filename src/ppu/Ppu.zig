@@ -237,25 +237,26 @@ fn draw_pixel(self: *Ppu) !void {
 
     const bg_pixel = try self.fifo_bg.pop();
     var final_pixel = bg_pixel;
+    var is_obj = false;
 
     if (self.fifo_obj.count > 0) {
-        // std.debug.print("{any}: {any}\n", .{ self.lcd_x, self.fifo_obj.buffer });
         const obj_pixel = try self.fifo_obj.pop();
-
         if (obj_pixel.color_index != 0) {
-            // std.debug.print("OBJ PIXEL\n", .{});
-            if (!obj_pixel.background_priority or bg_pixel.color_index == 0) {
+            const bg_transparent = bg_pixel.color_index == 0;
+            const bg_priority = bg_pixel.background_priority;
+            const obj_priority = obj_pixel.background_priority;
+            const master_priority = self.lcdc.priority; // LCDC Bit 0
+
+            // if lcdc.0 is 0, sprites always win.
+            // otherwise, OBJ wins if BG is transparent, or if neither BG nor OBJ has priority.
+            if (!master_priority or bg_transparent or (!bg_priority and !obj_priority)) {
                 final_pixel = obj_pixel;
+                is_obj = true;
             }
         }
     }
 
-    const color = switch (final_pixel.color_index) {
-        0 => rl.Color.ray_white,
-        1 => rl.Color.light_gray,
-        2 => rl.Color.dark_gray,
-        3 => rl.Color.black,
-    };
+    const color = self.resolve_cgb_color(final_pixel.color_index, final_pixel.palette, is_obj);
     self.screen[@as(usize, self.ly) * @as(usize, SCREEN_WIDTH) + @as(usize, self.lcd_x)] = color;
     self.lcd_x += 1;
 }
@@ -410,4 +411,18 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
         0xFF69, 0xFF6B => self.write_cram_cpu(address, value),
         else => {},
     }
+}
+
+fn resolve_cgb_color(self: *const Ppu, color_idx: u2, palette_idx: u3, is_obj: bool) rl.Color {
+    const ram = if (is_obj) &self.obj_CRAM else &self.bg_CRAM;
+    const base_addr = (@as(usize, palette_idx) * 8) + (@as(usize, color_idx) * 2);
+    const color_data = @as(u16, ram[base_addr]) | (@as(u16, ram[base_addr + 1]) << 8);
+
+    // Convert RGB555 to RGB888
+    return rl.Color{
+        .r = @intCast((color_data & 0x1F) * 255 / 31),
+        .g = @intCast(((color_data >> 5) & 0x1F) * 255 / 31),
+        .b = @intCast(((color_data >> 10) & 0x1F) * 255 / 31),
+        .a = 255,
+    };
 }
