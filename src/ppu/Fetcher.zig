@@ -110,7 +110,7 @@ fn getTileId(self: *Fetcher, ppu: *Ppu) struct { u8, OamAttributes } {
 
 /// Attempts to push the fetched tile data into the background FIFO
 fn tryPush(self: *Fetcher, ppu: *Ppu) bool {
-    ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high) catch {
+    ppu.fifo_bg.push(self.tile_data_low, self.tile_data_high, self.tile_attributes.x_flip) catch {
         return false;
     };
     self.fetcher_x += 8;

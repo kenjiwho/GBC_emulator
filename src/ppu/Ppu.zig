@@ -231,7 +231,7 @@ fn drawPixel(self: *Ppu) !void {
         const obj_pixel = try self.fifo_obj.pop();
 
         if (obj_pixel.color_index != 0) {
-            std.debug.print("OBJ PIXEL\n", .{});
+            // std.debug.print("OBJ PIXEL\n", .{});
             if (!obj_pixel.background_priority or bg_pixel.color_index == 0) {
                 final_pixel = obj_pixel;
             }

@@ -177,7 +177,7 @@ fn setup_boot_state(self: *Gbc) void {
 }
 
 pub fn run(self: *Gbc) !void {
-    rl.setTargetFPS(120);
+    rl.setTargetFPS(60);
     rl.initWindow(160 * 5, 144 * 5, "game window");
     defer rl.closeWindow();
 

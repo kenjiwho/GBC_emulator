@@ -14,12 +14,15 @@ pub fn init() Fifo {
 }
 
 /// Pushes row of 8 pixels into the FIFO from the provided tile data bytes
-pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8) error{Overflow}!void {
+pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8, x_flip: bool) error{Overflow}!void {
     if (self.count + 8 > self.buffer.len) {
         return Error.Overflow;
     }
 
-    for (0..self.buffer.len) |i| {
+    // push pixels in reverse order if x_flip is true
+    var i: i8 = if (x_flip) 7 else 0;
+    const adder: i8 = if (x_flip) -1 else 1;
+    while (i < self.buffer.len) : (i += adder) {
         const pixel_low = (tile_data_low >> @intCast(7 - i)) & 0x1;
         const pixel_high = (tile_data_high >> @intCast(7 - i)) & 0x1;
         const color_index: u2 = @intCast((pixel_high) << 1 | pixel_low);
