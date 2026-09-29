@@ -24,7 +24,6 @@ bus: Bus, // memory-mapped I/O
 dma: Dma,
 screen_texture: rl.Texture2D = undefined,
 device_mode: DeviceMode = undefined,
-cycles_executed: usize = 0, // cycles executed in current frame
 
 pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
     // put GB instance on heap so self-references work
@@ -55,6 +54,7 @@ pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
 
 pub fn deinit(self: *Gbc, allocator: Allocator) void {
     allocator.free(self.bus.ROM);
+    allocator.free(self.bus.boot_ROM);
     allocator.destroy(self);
 }
 
@@ -193,7 +193,6 @@ pub fn run(self: *Gbc) !void {
         accumulator += rl.getFrameTime();
         while (accumulator >= SECONDS_PER_FRAME) : (accumulator -= SECONDS_PER_FRAME) {
             self.step_frame();
-            self.cycles_executed -= CYCLES_PER_FRAME;
         }
         self.render();
     }
@@ -201,7 +200,7 @@ pub fn run(self: *Gbc) !void {
 
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
-    while (self.cycles_executed < CYCLES_PER_FRAME) {
+    while (!self.ppu.frame_complete) {
         if (self.dma.counter > 0) {
             self.dma.step();
             std.debug.print("DMA TRANSFER HAPPENING\n", .{});
@@ -240,9 +239,8 @@ fn step_frame(self: *Gbc) void {
         const system_cycles = if (is_double_speed) cycles / 2 else cycles;
 
         self.ppu.step(system_cycles);
-
-        self.cycles_executed += system_cycles;
     }
+    self.ppu.frame_complete = false;
 }
 
 /// Render the current screen to the window

@@ -35,6 +35,7 @@ inside_window: bool = false, // whether fetcher is currently fetching window til
 lcd_x: u8 = 0, // current pixel within the scanline
 vram_blocked: bool = false,
 total_dots: usize = 0, // total dots elapsed in current scanline
+frame_complete: bool = false, // whether the current frame has been completed
 
 fetcher: Fetcher = Fetcher.init(),
 fifo_bg: Fifo = Fifo.init(),
@@ -52,7 +53,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
     while (dots_used < cycles) {
         switch (self.stat.ppu_mode) {
             .oam_scan => { // 80 dots
-                const dots = self.oamScan();
+                const dots = self.oam_scan();
                 dots_used += dots;
                 self.total_dots += dots;
                 if (self.total_dots >= 80) {
@@ -102,6 +103,7 @@ pub fn step(self: *Ppu, cycles: usize) void {
                         self.fetcher.wl_internal = 0;
                         // Trigger VBlank interrupt
                         self.bus.io.request_interrupt(.vblank);
+                        self.frame_complete = true;
                     } else {
                         self.stat.ppu_mode = .oam_scan;
                         self.check_interrupts();
@@ -166,7 +168,7 @@ fn check_interrupts(self: *Ppu) void {
     }
 }
 
-fn oamScan(self: *Ppu) usize {
+fn oam_scan(self: *Ppu) usize {
     // OAM Scan takes 80 dots (2 dots per OAM entry)
 
     const offset = self.total_dots / 2;
@@ -177,9 +179,11 @@ fn oamScan(self: *Ppu) usize {
         .attributes = @bitCast(self.bus.OAM[offset * 4 + 3]),
     };
 
+    const obj_height: u8 = if (self.lcdc.obj_size == 1) 16 else 8;
+
     if (self.oam_count < 10 and
-        entry.y_position > self.ly + 16 and
-        entry.y_position <= self.ly + 16 + 8 + (8 * @as(u8, self.lcdc.obj_size)))
+        self.ly + 16 >= entry.y_position and
+        self.ly + 16 < entry.y_position + obj_height)
     {
         self.oam_buffer[self.oam_count] = entry;
         self.oam_count += 1;
@@ -191,7 +195,7 @@ fn oamScan(self: *Ppu) usize {
 fn draw_pixel(self: *Ppu) !void {
     if (self.lcdc.obj_enable) {
         for (self.oam_buffer[0..self.oam_count]) |sprite| {
-            if (self.lcd_x == sprite.x_position - 8) {
+            if (self.lcd_x == @as(i32, sprite.x_position) - 8) {
                 // std.debug.print("OAMENTRY: ", .{});
                 // std.debug.print("{any}\n", .{sprite});
                 // Calculate which row of the sprite we are on
