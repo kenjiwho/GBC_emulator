@@ -8,7 +8,7 @@ const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
 const Dma = @import("Dma.zig");
-const Debugger = @import("Debugger.zig");
+const Debugger = @import("debugger/Debugger.zig");
 const helper = @import("helper.zig");
 
 const DeviceMode = enum {
@@ -28,6 +28,8 @@ window: *zsdl3.SDL_Window = undefined,
 renderer: *zsdl3.SDL_Renderer = undefined,
 screen_texture: *zsdl3.SDL_Texture = undefined,
 device_mode: DeviceMode = undefined,
+
+was_paused: bool = false,
 
 debugger: Debugger,
 
@@ -206,9 +208,16 @@ pub fn run(self: *Gbc) !void {
     var accumulator: f64 = 0; // accumulator for frame timing
     while (!quit) {
         while (zsdl3.pollEvent(&event)) {
-            if (event.type == zsdl3.SDL_EVENT_QUIT) {
-                quit = true;
+            switch (event.type) {
+                zsdl3.SDL_EVENT_QUIT => quit = true,
+                zsdl3.SDL_EVENT_KEY_DOWN => self.handle_key_events(event.key.key),
+                else => {},
             }
+        }
+
+        if (self.was_paused) {
+            self.was_paused = false;
+            last_time = zsdl3.getTicksNS();
         }
 
         const current_time = zsdl3.getTicksNS();
@@ -226,58 +235,68 @@ pub fn run(self: *Gbc) !void {
 /// Execute CPU and PPU steps for one frame
 fn step_frame(self: *Gbc) void {
     var frame_cycles: usize = 0;
-
     while (!self.ppu.frame_complete) {
-        if (self.dma.counter > 0) {
-            self.dma.step();
-            std.debug.print("DMA TRANSFER HAPPENING\n", .{});
-        } else {
-            self.cpu.step() catch {
-                const opcode = self.bus.read(self.cpu.regs.PC - 1);
-                std.debug.print(
-                    "CRASH opcode=${X} PC=${X} SP=${X} AF=${X} BC=${X} DE=${X} HL=${X}\n",
-                    .{
-                        opcode,
-                        self.cpu.regs.PC - 1,
-                        self.cpu.regs.SP,
-                        self.cpu.regs.getAF(),
-                        self.cpu.regs.getBC(),
-                        self.cpu.regs.getDE(),
-                        self.cpu.regs.getHL(),
-                    },
-                );
-                std.debug.print(
-                    "stack: [{X:0>4}]={X} [{X:0>4}]={X}\n",
-                    .{
-                        self.cpu.regs.SP,
-                        self.bus.read(self.cpu.regs.SP),
-                        self.cpu.regs.SP + 1,
-                        self.bus.read(self.cpu.regs.SP + 1),
-                    },
-                );
-                std.process.exit(1);
-            };
+        if (self.debugger.is_paused) {
+            self.was_paused = true;
+            self.debugger.wait();
+            continue;
         }
 
-        const cycles = self.bus.timer.get_last_cycles();
-
-        // if double speed mode is enabled, each CPU cycle takes 2 system cycles
-        const is_double_speed = self.bus.io.getKey1().current_speed;
-        const system_cycles = if (is_double_speed) cycles / 2 else cycles;
-
-        self.ppu.step(system_cycles);
+        const system_cycles = self.single_step();
         frame_cycles += system_cycles;
 
         // if lcd is disabled, wait for 70224 cycles before breaking
         if (!self.ppu.lcdc.lcd_ppu_enable and frame_cycles >= CYCLES_PER_FRAME) {
-            break;
+            self.ppu.frame_complete = true;
         }
     }
     self.ppu.frame_complete = false;
 }
 
+pub fn single_step(self: *Gbc) usize {
+    if (self.dma.counter > 0) {
+        self.dma.step();
+        std.debug.print("DMA TRANSFER HAPPENING\n", .{});
+    } else {
+        self.cpu.step() catch {
+            const opcode = self.bus.read(self.cpu.regs.PC - 1);
+            std.debug.print(
+                "CRASH opcode=${X} PC=${X} SP=${X} AF=${X} BC=${X} DE=${X} HL=${X}\n",
+                .{
+                    opcode,
+                    self.cpu.regs.PC - 1,
+                    self.cpu.regs.SP,
+                    self.cpu.regs.getAF(),
+                    self.cpu.regs.getBC(),
+                    self.cpu.regs.getDE(),
+                    self.cpu.regs.getHL(),
+                },
+            );
+            std.debug.print(
+                "stack: [{X:0>4}]={X} [{X:0>4}]={X}\n",
+                .{
+                    self.cpu.regs.SP,
+                    self.bus.read(self.cpu.regs.SP),
+                    self.cpu.regs.SP + 1,
+                    self.bus.read(self.cpu.regs.SP + 1),
+                },
+            );
+            std.process.exit(1);
+        };
+    }
+
+    const cycles = self.bus.timer.get_last_cycles();
+
+    // if double speed mode is enabled, each CPU cycle takes 2 system cycles
+    const is_double_speed = self.bus.io.getKey1().current_speed;
+    const system_cycles = if (is_double_speed) cycles / 2 else cycles;
+
+    self.ppu.step(system_cycles);
+    return system_cycles;
+}
+
 /// Render the current screen to the window
-fn render(self: *const Gbc) void {
+pub fn render(self: *const Gbc) void {
     _ = zsdl3.renderClear(self.renderer);
 
     _ = zsdl3.updateTexture(
@@ -295,6 +314,11 @@ fn render(self: *const Gbc) void {
     );
 
     _ = zsdl3.renderPresent(self.renderer);
+}
 
-    // rl.drawFPS(10, 10);
+fn handle_key_events(self: *Gbc, key: u32) void {
+    switch (key) {
+        zsdl3.SDLK_SPACE => self.debugger.is_paused = true,
+        else => {},
+    }
 }

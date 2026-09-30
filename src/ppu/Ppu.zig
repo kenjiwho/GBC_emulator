@@ -214,7 +214,7 @@ fn draw_pixel(self: *Ppu) !void {
                 }
 
                 const bank = sprite.attributes.vram_bank;
-                const address = @as(u16, 0x8000) + sprite.tile_index * 16 + (line_y * 2);
+                const address = @as(u16, 0x8000) + @as(u16, sprite.tile_index) * 16 + (line_y * 2);
 
                 const tile_data_low = self.read_vram(bank, address);
                 const tile_data_high = self.read_vram(bank, address + 1);
