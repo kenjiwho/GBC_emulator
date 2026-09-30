@@ -15,7 +15,7 @@ pub fn init() Fifo {
 }
 
 /// Pushes row of 8 pixels into the FIFO from the provided tile data bytes
-pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8, attributes: OamAttributes) error{Overflow}!void {
+pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8, attributes: OamAttributes) error{ Overflow, Underflow }!void {
     if (self.count + 8 > self.buffer.len) {
         return Error.Overflow;
     }
@@ -71,7 +71,7 @@ pub fn mix(self: *Fifo, tile_data_low: u8, tile_data_high: u8, attributes: OamAt
 }
 
 /// Pops a pixel from the front of the FIFO
-pub fn pop(self: *Fifo) error{Underflow}!Pixel {
+pub fn pop(self: *Fifo) error{ Overflow, Underflow }!Pixel {
     if (self.count == 0) {
         return Error.Underflow;
     }

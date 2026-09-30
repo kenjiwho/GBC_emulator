@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
-    exe.addLibraryPath(b.path("lib"));
+    exe.root_module.addLibraryPath(b.path("lib"));
     b.installBinFile("lib/SDL3.dll", "SDL3.dll");
     exe.root_module.linkSystemLibrary("SDL3", .{});
     // --------------------------------------------------------------

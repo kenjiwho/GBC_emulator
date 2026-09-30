@@ -1,13 +1,13 @@
 const std = @import("std");
 const Gbc = @import("Gbc.zig");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    _ = args;
+
     // if (args.len != 2) {
     //     std.debug.print("Usage: {s} <path to rom>\n", .{args[0]});
     //     return;
@@ -26,14 +26,15 @@ pub fn main() !void {
     //     "./tests/gbc_bios.bin",
     // );
     var gbc = try Gbc.init(
-        allocator,
+        io,
+        gpa,
         "./tests/cgb-acid2.gbc",
         "./tests/gbc_bios.bin",
     );
     // var gbc = try Gbc.init(allocator, "./tests/blargg_test/halt_bug.gb");
     // var gbc = try Gbc.init(allocator, "./tests/mooneye/call_cc_timing.gb");
     // var gbc = try Gbc.init(allocator, "./.roms/Tetris.gb");
-    defer gbc.deinit(allocator);
+    defer gbc.deinit(gpa);
 
     try gbc.run();
 }

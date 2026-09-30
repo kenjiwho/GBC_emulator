@@ -2,6 +2,7 @@ const Gbc = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const zsdl3 = @import("zsdl3");
 const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
@@ -17,7 +18,7 @@ const DeviceMode = enum {
 
 const CPU_CLOCK_HZ = 4_194_304;
 const CYCLES_PER_FRAME = 70_224;
-const NS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) * 1_000_000_000 / CPU_CLOCK_HZ;
+const NS_PER_FRAME: f64 = @as(f64, CYCLES_PER_FRAME) * 1_000_000_000 / CPU_CLOCK_HZ;
 
 cpu: Cpu,
 ppu: Ppu,
@@ -30,7 +31,7 @@ device_mode: DeviceMode = undefined,
 
 debugger: Debugger,
 
-pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
+pub fn init(io: Io, allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
     // put GB instance on heap so self-references work
     const gbc = try allocator.create(Gbc);
     errdefer allocator.destroy(gbc);
@@ -50,8 +51,8 @@ pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
         .debugger = debugger,
     };
 
-    try gbc.load_rom(allocator, rom);
-    try gbc.load_boot_rom(allocator, boot_rom);
+    try gbc.load_rom(io, allocator, rom);
+    try gbc.load_boot_rom(io, allocator, boot_rom);
     // set device mode based on ROM header
     gbc.device_mode = if (gbc.bus.ROM[0x143] == 0x80 or gbc.bus.ROM[0x143] == 0xC0) .CGB else .DMG;
     // gbc.setup_boot_state();
@@ -65,29 +66,15 @@ pub fn deinit(self: *Gbc, allocator: Allocator) void {
     allocator.destroy(self);
 }
 
-fn load_rom(self: *Gbc, allocator: Allocator, rom_file: []const u8) !void {
-    const file = try std.fs.cwd().openFile(rom_file, .{ .mode = .read_only });
-    defer file.close();
-    var buffer: [0x4000]u8 = undefined;
-    var file_reader = file.reader(&buffer);
-    const reader = &file_reader.interface;
-
-    const rom_size = try file.getEndPos();
-    const rom = try reader.readAlloc(allocator, rom_size);
+fn load_rom(self: *Gbc, io: Io, allocator: Allocator, rom_file: []const u8) !void {
+    const rom = try helper.readFile(io, allocator, rom_file);
 
     // read ROM into memory
     self.bus.insert_rom(rom);
 }
 
-fn load_boot_rom(self: *Gbc, allocator: Allocator, boot_rom_file: []const u8) !void {
-    const file = try std.fs.cwd().openFile(boot_rom_file, .{ .mode = .read_only });
-    defer file.close();
-    var buffer: [0x1000]u8 = undefined;
-    var file_reader = file.reader(&buffer);
-    const reader = &file_reader.interface;
-
-    const boot_rom_size = try file.getEndPos();
-    const boot_rom = try reader.readAlloc(allocator, boot_rom_size);
+fn load_boot_rom(self: *Gbc, io: Io, allocator: Allocator, boot_rom_file: []const u8) !void {
+    const boot_rom = try helper.readFile(io, allocator, boot_rom_file);
 
     // read boot ROM into memory
     self.bus.insert_boot_rom(boot_rom);
