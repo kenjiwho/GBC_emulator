@@ -1,4 +1,6 @@
 zig-out/
+zig-pkg/
 .zig-cache/
+vcpkg_installed/
 
 .roms/

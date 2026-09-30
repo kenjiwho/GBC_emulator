@@ -21,16 +21,8 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_module,
     });
 
-    // ------------------------ Dependencies ------------------------
-    const zsdl3 = b.dependency("zsdl3", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
-    exe.root_module.addLibraryPath(b.path("lib"));
-    b.installBinFile("lib/SDL3.dll", "SDL3.dll");
-    exe.root_module.linkSystemLibrary("SDL3", .{});
-    // --------------------------------------------------------------
+    manage_dependencies_windows(b, target, optimize, exe);
+    manage_dependencies_windows(b, target, optimize, exe_check);
 
     b.installArtifact(exe);
 
@@ -56,4 +48,42 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+}
+
+fn manage_dependencies_windows(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, exe: *std.Build.Step.Compile) void {
+    // integrate with vcpkg
+    const vcpkg_triplet = switch (target.result.cpu.arch) {
+        .x86_64 => "x64-windows",
+        .x86 => "x86-windows",
+        .arm => "arm-windows",
+        .aarch64 => "arm64-windows",
+        else => @panic("Unsupported architecture"),
+    };
+    const vcpkg_cmd = b.addSystemCommand(&.{
+        "vcpkg",
+        "install",
+        b.fmt("--triplet={s}", .{vcpkg_triplet}),
+    });
+    vcpkg_cmd.addFileInput(b.path("vcpkg.json"));
+    const vcpkg_bin = b.pathJoin(&.{ "vcpkg_installed", vcpkg_triplet, "bin" });
+    const vcpkg_lib = b.pathJoin(&.{ "vcpkg_installed", vcpkg_triplet, "lib" });
+    const vcpkg_include = b.pathJoin(&.{ "vcpkg_installed", vcpkg_triplet, "include" });
+
+    const zsdl3 = b.dependency("zsdl3", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
+    exe.root_module.addIncludePath(b.path(vcpkg_include));
+    exe.root_module.addLibraryPath(b.path(vcpkg_lib));
+
+    const install_dsl3 = b.addInstallBinFile(b.path(b.pathJoin(&.{ vcpkg_bin, "SDL3.dll" })), "SDL3.dll");
+
+    // make this step depend on the vcpkg command
+    install_dsl3.step.dependOn(&vcpkg_cmd.step);
+    // exe step depends on both
+    exe.step.dependOn(&vcpkg_cmd.step);
+    exe.step.dependOn(&install_dsl3.step);
+
+    exe.root_module.linkSystemLibrary("SDL3", .{});
 }
