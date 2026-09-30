@@ -17,7 +17,6 @@ const DeviceMode = enum {
 
 const CPU_CLOCK_HZ = 4_194_304;
 const CYCLES_PER_FRAME = 70_224;
-const SECONDS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) / CPU_CLOCK_HZ;
 const NS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) * 1_000_000_000 / CPU_CLOCK_HZ;
 
 cpu: Cpu,
@@ -185,30 +184,32 @@ fn setup_boot_state(self: *Gbc) void {
 }
 
 pub fn run(self: *Gbc) !void {
-    try zsdl3.init(.{ .video = true });
+    if (!zsdl3.init(zsdl3.SDL_INIT_VIDEO)) {
+        return error.SDLInitFailed;
+    }
     defer zsdl3.quit();
 
     // Main game window
-    self.window = try zsdl3.createWindow(
+    self.window = zsdl3.createWindow(
         "Game Boy Color Emulator",
         Ppu.SCREEN_WIDTH * 5,
         Ppu.SCREEN_HEIGHT * 5,
-        .{},
-    );
+        zsdl3.SDL_WINDOW_RESIZABLE,
+    ) orelse return;
     defer zsdl3.destroyWindow(self.window);
 
     // renderer for the game window
-    self.renderer = try zsdl3.createRenderer(self.window, .{});
+    self.renderer = zsdl3.createRenderer(self.window, null) orelse return error.SDLRendererFailed;
     defer zsdl3.destroyRenderer(self.renderer);
 
-    self.texture = try zsdl3.createTexture(
+    self.screen_texture = zsdl3.createTexture(
         self.renderer,
         zsdl3.SDL_PIXELFORMAT_ARGB8888,
         zsdl3.SDL_TEXTUREACCESS_STREAMING,
         Ppu.SCREEN_WIDTH,
         Ppu.SCREEN_HEIGHT,
-    );
-    defer zsdl3.destroyTexture(self.texture);
+    ) orelse return error.SDLTextureFailed;
+    defer zsdl3.destroyTexture(self.screen_texture);
 
     var event: zsdl3.SDL_Event = undefined;
     var quit: bool = false;
@@ -216,14 +217,14 @@ pub fn run(self: *Gbc) !void {
     var accumulator: f64 = 0; // accumulator for frame timing
     while (!quit) {
         while (zsdl3.pollEvent(&event)) {
-            if (event.type == zsdl3.SDL_QUIT) {
+            if (event.type == zsdl3.SDL_EVENT_QUIT) {
                 quit = true;
             }
         }
 
         const current_time = zsdl3.getTicksNS();
         const delta = current_time - last_time;
-        accumulator += delta;
+        accumulator += @floatFromInt(delta);
         last_time = current_time;
 
         while (accumulator >= NS_PER_FRAME) : (accumulator -= NS_PER_FRAME) {
