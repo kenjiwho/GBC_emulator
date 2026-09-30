@@ -192,8 +192,8 @@ pub fn run(self: *Gbc) !void {
     // Main game window
     self.window = zsdl3.createWindow(
         "Game Boy Color Emulator",
-        Ppu.SCREEN_WIDTH * 5,
-        Ppu.SCREEN_HEIGHT * 5,
+        Ppu.SCREEN_WIDTH * 2,
+        Ppu.SCREEN_HEIGHT * 2,
         zsdl3.SDL_WINDOW_RESIZABLE,
     ) orelse return;
     defer zsdl3.destroyWindow(self.window);
@@ -210,6 +210,8 @@ pub fn run(self: *Gbc) !void {
         Ppu.SCREEN_HEIGHT,
     ) orelse return error.SDLTextureFailed;
     defer zsdl3.destroyTexture(self.screen_texture);
+    // No blurring between pixels
+    _ = zsdl3.setTextureScaleMode(self.screen_texture, zsdl3.SDL_SCALEMODE_NEAREST);
 
     var event: zsdl3.SDL_Event = undefined;
     var quit: bool = false;

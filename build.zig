@@ -16,16 +16,10 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_module,
     });
 
-    exe.use_llvm = true;
-    exe.use_lld = true;
-
     const exe_check = b.addExecutable(.{
         .name = "GBC_emulator",
         .root_module = exe_module,
     });
-
-    exe_check.use_llvm = true;
-    exe_check.use_lld = true;
 
     // ------------------------ Dependencies ------------------------
     const zsdl3 = b.dependency("zsdl3", .{
@@ -33,6 +27,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
+    exe.addLibraryPath(b.path("lib"));
+    b.installBinFile("lib/SDL3.dll", "SDL3.dll");
     exe.root_module.linkSystemLibrary("SDL3", .{});
     // --------------------------------------------------------------
 
