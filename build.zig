@@ -28,17 +28,12 @@ pub fn build(b: *std.Build) void {
     exe_check.use_lld = true;
 
     // ------------------------ Dependencies ------------------------
-    const raylib_dep = b.dependency("raylib_zig", .{
+    const zsdl3 = b.dependency("zsdl3", .{
         .target = target,
         .optimize = optimize,
     });
-
-    const raylib = raylib_dep.module("raylib"); // main raylib module
-    const raygui = raylib_dep.module("raygui"); // raygui module
-    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
-    exe.linkLibrary(raylib_artifact);
-    exe_module.addImport("raylib", raylib);
-    exe_module.addImport("raygui", raygui);
+    exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
+    exe.root_module.linkSystemLibrary("SDL3", .{});
     // --------------------------------------------------------------
 
     b.installArtifact(exe);

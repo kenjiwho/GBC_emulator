@@ -32,9 +32,9 @@
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
-        .raylib_zig = .{
-            .url = "git+https://github.com/raylib-zig/raylib-zig?ref=devel#7d4761b878f43671024ce197f721827b5355a67e",
-            .hash = "raylib_zig-5.6.0-dev-KE8REGlNBQDR7NML06VBtT7gP3VZNY70E5WohAxzqrNn",
+        .zsdl3 = .{
+            .url = "git+https://github.com/felixuxx/zsdl3.git#3659117a955d175c680add0ffaeeeb43e2537cfa",
+            .hash = "zsdl3-0.0.0-l0pNpNL6BwCqFiKwNGiUePJa60agOcirrIiAgYDrYVLW",
         },
     },
     .paths = .{

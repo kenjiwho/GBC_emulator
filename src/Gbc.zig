@@ -2,11 +2,12 @@ const Gbc = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const rl = @import("raylib");
+const zsdl3 = @import("zsdl3");
 const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
 const Dma = @import("Dma.zig");
+const Debugger = @import("Debugger.zig");
 const helper = @import("helper.zig");
 
 const DeviceMode = enum {
@@ -17,13 +18,18 @@ const DeviceMode = enum {
 const CPU_CLOCK_HZ = 4_194_304;
 const CYCLES_PER_FRAME = 70_224;
 const SECONDS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) / CPU_CLOCK_HZ;
+const NS_PER_FRAME: f64 = @as(f64, @floatFromInt(CYCLES_PER_FRAME)) * 1_000_000_000 / CPU_CLOCK_HZ;
 
 cpu: Cpu,
 ppu: Ppu,
-bus: Bus, // memory-mapped I/O
+bus: Bus,
 dma: Dma,
-screen_texture: rl.Texture2D = undefined,
+window: *zsdl3.SDL_Window = undefined,
+renderer: *zsdl3.SDL_Renderer = undefined,
+screen_texture: *zsdl3.SDL_Texture = undefined,
 device_mode: DeviceMode = undefined,
+
+debugger: Debugger,
 
 pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
     // put GB instance on heap so self-references work
@@ -35,12 +41,14 @@ pub fn init(allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
     const cpu = Cpu.init(&gbc.bus);
     const ppu = Ppu.init(&gbc.bus);
     const dma = Dma.init(&gbc.bus, &gbc.ppu);
+    const debugger = Debugger.init(gbc);
 
     gbc.* = Gbc{
         .cpu = cpu,
         .ppu = ppu,
         .bus = bus,
         .dma = dma,
+        .debugger = debugger,
     };
 
     try gbc.load_rom(allocator, rom);
@@ -177,21 +185,48 @@ fn setup_boot_state(self: *Gbc) void {
 }
 
 pub fn run(self: *Gbc) !void {
-    rl.setTargetFPS(60);
-    rl.initWindow(160 * 5, 144 * 5, "game window");
-    defer rl.closeWindow();
+    try zsdl3.init(.{ .video = true });
+    defer zsdl3.quit();
 
-    // create an empty texture for the screen
-    const image = rl.genImageColor(Ppu.SCREEN_WIDTH, Ppu.SCREEN_HEIGHT, rl.Color.black);
-    self.screen_texture = try rl.loadTextureFromImage(image);
-    defer rl.unloadTexture(self.screen_texture);
-    rl.unloadImage(image);
+    // Main game window
+    self.window = try zsdl3.createWindow(
+        "Game Boy Color Emulator",
+        Ppu.SCREEN_WIDTH * 5,
+        Ppu.SCREEN_HEIGHT * 5,
+        .{},
+    );
+    defer zsdl3.destroyWindow(self.window);
 
+    // renderer for the game window
+    self.renderer = try zsdl3.createRenderer(self.window, .{});
+    defer zsdl3.destroyRenderer(self.renderer);
+
+    self.texture = try zsdl3.createTexture(
+        self.renderer,
+        zsdl3.SDL_PIXELFORMAT_ARGB8888,
+        zsdl3.SDL_TEXTUREACCESS_STREAMING,
+        Ppu.SCREEN_WIDTH,
+        Ppu.SCREEN_HEIGHT,
+    );
+    defer zsdl3.destroyTexture(self.texture);
+
+    var event: zsdl3.SDL_Event = undefined;
+    var quit: bool = false;
+    var last_time = zsdl3.getTicksNS();
     var accumulator: f64 = 0; // accumulator for frame timing
+    while (!quit) {
+        while (zsdl3.pollEvent(&event)) {
+            if (event.type == zsdl3.SDL_QUIT) {
+                quit = true;
+            }
+        }
 
-    while (!rl.windowShouldClose()) {
-        accumulator += rl.getFrameTime();
-        while (accumulator >= SECONDS_PER_FRAME) : (accumulator -= SECONDS_PER_FRAME) {
+        const current_time = zsdl3.getTicksNS();
+        const delta = current_time - last_time;
+        accumulator += delta;
+        last_time = current_time;
+
+        while (accumulator >= NS_PER_FRAME) : (accumulator -= NS_PER_FRAME) {
             self.step_frame();
         }
         self.render();
@@ -253,30 +288,23 @@ fn step_frame(self: *Gbc) void {
 
 /// Render the current screen to the window
 fn render(self: *const Gbc) void {
-    const window_width: f32 = @floatFromInt(rl.getScreenWidth());
-    const window_height: f32 = @floatFromInt(rl.getScreenHeight());
+    _ = zsdl3.renderClear(self.renderer);
 
-    rl.beginDrawing();
-    defer rl.endDrawing();
+    _ = zsdl3.updateTexture(
+        self.screen_texture,
+        null, // null means whole texture
+        &self.ppu.screen,
+        Ppu.SCREEN_WIDTH * 4, // pitch (bytes per row) = width * 4 (bytes per pixel)
+    );
 
-    rl.clearBackground(rl.Color.black);
-    rl.updateTexture(self.screen_texture, &self.ppu.screen);
+    _ = zsdl3.renderTexture(
+        self.renderer,
+        self.screen_texture,
+        null, // src rect (null means whole texture)
+        null, // dest rect (null means whole window)
+    );
 
-    const source_rect = rl.Rectangle{
-        .x = 0,
-        .y = 0,
-        .width = Ppu.SCREEN_WIDTH,
-        .height = Ppu.SCREEN_HEIGHT,
-    };
-    const dest_rect = rl.Rectangle{
-        .x = 0,
-        .y = 0,
-        .width = window_width,
-        .height = window_height,
-    };
-    const origin = rl.Vector2{ .x = 0, .y = 0 };
+    _ = zsdl3.renderPresent(self.renderer);
 
-    rl.drawTexturePro(self.screen_texture, source_rect, dest_rect, origin, 0, rl.Color.white);
-
-    rl.drawFPS(10, 10);
+    // rl.drawFPS(10, 10);
 }

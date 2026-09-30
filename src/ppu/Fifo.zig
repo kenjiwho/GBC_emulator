@@ -27,10 +27,10 @@ pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8, attributes: OamA
         const pixel_low = (tile_data_low >> bit_idx) & 0x1;
         const pixel_high = (tile_data_high >> bit_idx) & 0x1;
         self.buffer[self.tail] = Pixel{
-                    .color_index = @intCast((pixel_high) << 1 | pixel_low),
-                    .palette = attributes.cgb_palette,
-                    .background_priority = attributes.priority,
-                };
+            .color_index = @intCast((pixel_high) << 1 | pixel_low),
+            .palette = attributes.cgb_palette,
+            .background_priority = attributes.priority,
+        };
         self.tail = (self.tail + 1) % self.buffer.len;
         self.count += 1;
     }

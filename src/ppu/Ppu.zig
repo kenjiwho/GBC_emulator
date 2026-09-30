@@ -2,7 +2,6 @@
 //! created with reference to https://github.com/ISSOtm/pandocs/blob/rendering-internals/src/Rendering_Internals.md
 const Ppu = @This();
 
-const rl = @import("raylib");
 const Bus = @import("../Bus.zig");
 const Fetcher = @import("Fetcher.zig");
 const Fifo = @import("Fifo.zig");
@@ -18,7 +17,7 @@ pub const SCREEN_WIDTH: f32 = 160;
 
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 OAM: [0xA0]u8 = @splat(0), // Object Attribute Memory (OAM): FE00-FE9F
-screen: [SCREEN_HEIGHT * SCREEN_WIDTH]rl.Color = @splat(rl.Color.black), // 144x160 pixels
+screen: [SCREEN_HEIGHT * SCREEN_WIDTH]u32 = @splat(0xFF000000), // 144x160 pixels
 // TODO: PROBLEMS WHEN UNINITIALIZED oam entry is looped over?
 oam_buffer: [10]OamEntry = undefined, // buffer for up to 10 sprites per scanline
 oam_count: u8 = 0, // number of sprites in the oam_buffer
@@ -277,9 +276,7 @@ pub fn write_oam(self: *Ppu, address: u16, value: u8) void {
 
 // CRAM read/write
 pub fn read_cram(self: *const Ppu, address: u16) u8 {
-    if (address == 0xFF69) return self.bg_CRAM[self.bgpi.address]
-    else if (address == 0xFF6B) return self.obj_CRAM[self.obpi.address]
-    else unreachable;
+    if (address == 0xFF69) return self.bg_CRAM[self.bgpi.address] else if (address == 0xFF6B) return self.obj_CRAM[self.obpi.address] else unreachable;
 }
 
 pub fn write_cram(self: *Ppu, address: u16, value: u8) void {
@@ -330,9 +327,7 @@ pub fn write_oam_cpu(self: *Ppu, address: u16, value: u8) void {
 pub fn read_cram_cpu(self: *const Ppu, address: u16) u8 {
     // return 0xFF if CRAM is not accessible
     if (self.stat.ppu_mode == .drawing) return 0xFF;
-    if (address == 0xFF69) return self.bg_CRAM[self.bgpi.address]
-    else if (address == 0xFF6B) return self.obj_CRAM[self.obpi.address]
-    else unreachable;
+    if (address == 0xFF69) return self.bg_CRAM[self.bgpi.address] else if (address == 0xFF6B) return self.obj_CRAM[self.obpi.address] else unreachable;
 }
 
 pub fn write_cram_cpu(self: *Ppu, address: u16, value: u8) void {
@@ -407,16 +402,19 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
     }
 }
 
-fn resolve_cgb_color(self: *const Ppu, color_idx: u2, palette_idx: u3, is_obj: bool) rl.Color {
+fn resolve_cgb_color(self: *const Ppu, color_idx: u2, palette_idx: u3, is_obj: bool) u32 {
     const ram = if (is_obj) &self.obj_CRAM else &self.bg_CRAM;
     const base_addr = (@as(usize, palette_idx) * 8) + (@as(usize, color_idx) * 2);
     const color_data = @as(u16, ram[base_addr]) | (@as(u16, ram[base_addr + 1]) << 8);
 
+    const r_5: u32 = color_data & 0x1F;
+    const g_5: u32 = (color_data >> 5) & 0x1F;
+    const b_5: u32 = (color_data >> 10) & 0x1F;
+
+    const r: u32 = (r_5 * 255) / 31;
+    const g: u32 = (g_5 * 255) / 31;
+    const b: u32 = (b_5 * 255) / 31;
+
     // Convert RGB555 to RGB888
-    return rl.Color{
-        .r = @intCast((color_data & 0x1F) * 255 / 31),
-        .g = @intCast(((color_data >> 5) & 0x1F) * 255 / 31),
-        .b = @intCast(((color_data >> 10) & 0x1F) * 255 / 31),
-        .a = 255,
-    };
+    return 0xFF000000 | (r << 16) | (g << 8) | b;
 }
