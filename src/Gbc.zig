@@ -29,8 +29,6 @@ renderer: *zsdl3.SDL_Renderer = undefined,
 screen_texture: *zsdl3.SDL_Texture = undefined,
 device_mode: DeviceMode = undefined,
 
-was_paused: bool = false,
-
 debugger: Debugger,
 
 pub fn init(io: Io, allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
@@ -190,6 +188,13 @@ pub fn run(self: *Gbc) !void {
     // renderer for the game window
     self.renderer = zsdl3.createRenderer(self.window, null) orelse return error.SDLRendererFailed;
     defer zsdl3.destroyRenderer(self.renderer);
+    // gbc screen should not stretch to fill the window
+    _ = zsdl3.setRenderLogicalPresentation(
+        self.renderer,
+        Ppu.SCREEN_WIDTH,
+        Ppu.SCREEN_HEIGHT,
+        zsdl3.SDL_LOGICAL_PRESENTATION_LETTERBOX,
+    );
 
     self.screen_texture = zsdl3.createTexture(
         self.renderer,
@@ -215,14 +220,11 @@ pub fn run(self: *Gbc) !void {
             }
         }
 
-        if (self.was_paused) {
-            self.was_paused = false;
-            last_time = zsdl3.getTicksNS();
-        }
-
         const current_time = zsdl3.getTicksNS();
-        const delta = current_time - last_time;
-        accumulator += @floatFromInt(delta);
+        var delta: f64 = @floatFromInt(current_time - last_time);
+        // clamp delta to avoid the emulator trying to catch up when the window was paused
+        if (delta >= 100_000_000) delta = NS_PER_FRAME;
+        accumulator += delta;
         last_time = current_time;
 
         while (accumulator >= NS_PER_FRAME) : (accumulator -= NS_PER_FRAME) {
@@ -237,9 +239,7 @@ fn step_frame(self: *Gbc) void {
     var frame_cycles: usize = 0;
     while (!self.ppu.frame_complete) {
         if (self.debugger.is_paused) {
-            self.was_paused = true;
             self.debugger.wait();
-            continue;
         }
 
         const system_cycles = self.single_step();

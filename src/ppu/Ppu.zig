@@ -12,8 +12,8 @@ const OamEntry = ppu_structs.OamEntry;
 const Bgpi = ppu_structs.Bgpi;
 const Obpi = ppu_structs.Obpi;
 
-pub const SCREEN_HEIGHT: f32 = 144;
-pub const SCREEN_WIDTH: f32 = 160;
+pub const SCREEN_HEIGHT: usize = 144;
+pub const SCREEN_WIDTH: usize = 160;
 
 VRAM: [0x2000 * 2]u8 = @splat(0), // 8KiB Video RAM switchable 0/1: 8000-9FFF
 OAM: [0xA0]u8 = @splat(0), // Object Attribute Memory (OAM): FE00-FE9F

@@ -16,8 +16,8 @@ pub fn init(gbc: *Gbc) Debugger {
 pub fn wait(self: *Debugger) void {
     const window = zsdl3.createWindow(
         "Debugger window",
-        1080,
-        720,
+        640,
+        640,
         zsdl3.SDL_WINDOW_RESIZABLE,
     ) orelse return;
     defer zsdl3.destroyWindow(window);
