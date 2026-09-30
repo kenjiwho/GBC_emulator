@@ -21,8 +21,13 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_module,
     });
 
-    manage_dependencies_windows(b, target, optimize, exe);
-    manage_dependencies_windows(b, target, optimize, exe_check);
+    if (target.result.os.tag == .windows) {
+        manage_dependencies_windows(b, target, optimize, exe);
+        manage_dependencies_windows(b, target, optimize, exe_check);
+    } else {
+        manage_dependencies(b, exe);
+        manage_dependencies(b, exe_check);
+    }
 
     b.installArtifact(exe);
 
@@ -48,6 +53,12 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_exe_tests.step);
+}
+
+fn manage_dependencies(b: *std.Build, exe: *std.Build.Step.Compile) void {
+    const zsdl3 = b.dependency("zsdl3", .{});
+    exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
+    exe.root_module.linkSystemLibrary("SDL3", .{});
 }
 
 fn manage_dependencies_windows(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, exe: *std.Build.Step.Compile) void {
