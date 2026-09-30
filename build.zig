@@ -62,22 +62,28 @@ fn manage_dependencies_windows(b: *std.Build, target: std.Build.ResolvedTarget, 
     const vcpkg_cmd = b.addSystemCommand(&.{
         "vcpkg",
         "install",
-        b.fmt("--triplet={s}", .{vcpkg_triplet}),
+        "--triplet",
+        vcpkg_triplet,
     });
+    // add vcpkg.json as a file input
     vcpkg_cmd.addFileInput(b.path("vcpkg.json"));
-    const vcpkg_bin = b.pathJoin(&.{ "vcpkg_installed", vcpkg_triplet, "bin" });
-    const vcpkg_lib = b.pathJoin(&.{ "vcpkg_installed", vcpkg_triplet, "lib" });
-    const vcpkg_include = b.pathJoin(&.{ "vcpkg_installed", vcpkg_triplet, "include" });
+    vcpkg_cmd.addArg("--x-install-root");
+    // add output directory arg (vcpkg_installed will be inside .zig-cache)
+    const vcpkg_out_dir = vcpkg_cmd.addOutputDirectoryArg("vcpkg_installed");
+
+    const vcpkg_bin = vcpkg_out_dir.path(b, b.pathJoin(&.{ vcpkg_triplet, "bin" }));
+    const vcpkg_lib = vcpkg_out_dir.path(b, b.pathJoin(&.{ vcpkg_triplet, "lib" }));
+    const vcpkg_include = vcpkg_out_dir.path(b, b.pathJoin(&.{ vcpkg_triplet, "include" }));
 
     const zsdl3 = b.dependency("zsdl3", .{
         .target = target,
         .optimize = optimize,
     });
     exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
-    exe.root_module.addIncludePath(b.path(vcpkg_include));
-    exe.root_module.addLibraryPath(b.path(vcpkg_lib));
+    exe.root_module.addIncludePath(vcpkg_include);
+    exe.root_module.addLibraryPath(vcpkg_lib);
 
-    const install_dsl3 = b.addInstallBinFile(b.path(b.pathJoin(&.{ vcpkg_bin, "SDL3.dll" })), "SDL3.dll");
+    const install_dsl3 = b.addInstallBinFile(vcpkg_bin.path(b, "SDL3.dll"), "SDL3.dll");
 
     // make this step depend on the vcpkg command
     install_dsl3.step.dependOn(&vcpkg_cmd.step);
