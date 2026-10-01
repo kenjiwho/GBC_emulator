@@ -1,8 +1,8 @@
 const std = @import("std");
-const Cpu = @import("../cpu/Cpu.zig");
-const Bus = @import("../Bus.zig");
-const Timer = @import("../Timer.zig");
-const Io = @import("../Io.zig");
+const Cpu = @import("../core/cpu/Cpu.zig");
+const Bus = @import("../core/Bus.zig");
+const Timer = @import("../core/Timer.zig");
+const Io = @import("../core/Io.zig");
 
 test "NOP" {
     // setup fake ROM

@@ -9,7 +9,7 @@ const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
 const Dma = @import("Dma.zig");
 const Debugger = @import("debugger/Debugger.zig");
-const helper = @import("helper.zig");
+const helper = @import("../helper.zig");
 
 const DeviceMode = enum {
     DMG,
