@@ -1,5 +1,5 @@
 {
   "name": "gbc-emulator",
   "version-string": "0.0.0",
-  "dependencies": ["sdl3", "sdl3-image", "sdl3-mixer"]
+  "dependencies": ["sdl3", "sdl3-image", "sdl3-mixer", "sdl3-ttf"]
 }

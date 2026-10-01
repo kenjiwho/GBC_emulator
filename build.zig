@@ -94,13 +94,17 @@ fn manage_dependencies_windows(b: *std.Build, target: std.Build.ResolvedTarget, 
     exe.root_module.addIncludePath(vcpkg_include);
     exe.root_module.addLibraryPath(vcpkg_lib);
 
-    const install_dsl3 = b.addInstallBinFile(vcpkg_bin.path(b, "SDL3.dll"), "SDL3.dll");
+    const install_sdl3 = b.addInstallBinFile(vcpkg_bin.path(b, "SDL3.dll"), "SDL3.dll");
+    const install_sdl3_ttf = b.addInstallBinFile(vcpkg_bin.path(b, "SDL3_ttf.dll"), "SDL3_ttf.dll");
 
     // make this step depend on the vcpkg command
-    install_dsl3.step.dependOn(&vcpkg_cmd.step);
+    install_sdl3.step.dependOn(&vcpkg_cmd.step);
+    install_sdl3_ttf.step.dependOn(&vcpkg_cmd.step);
     // exe step depends on both
     exe.step.dependOn(&vcpkg_cmd.step);
-    exe.step.dependOn(&install_dsl3.step);
+    exe.step.dependOn(&install_sdl3.step);
+    exe.step.dependOn(&install_sdl3_ttf.step);
 
     exe.root_module.linkSystemLibrary("SDL3", .{});
+    exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
 }
