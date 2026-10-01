@@ -7,6 +7,7 @@ const Gbc = @import("../Gbc.zig");
 const TextBox = @import("TextBox.zig");
 
 const FONT_DATA: []const u8 = @embedFile("../assets/fonts/JetBrainsMonoNL-Regular.ttf");
+const MS_PER_FRAME = 1000.0 / 60.0; // 60 FPS
 
 gbc: *Gbc,
 
@@ -48,6 +49,8 @@ pub fn wait(self: *Debugger) void {
     defer zsdl3.ttf.closeFont(font);
 
     while (self.is_paused) {
+        const frame_start = zsdl3.getTicks();
+
         var event: zsdl3.SDL_Event = undefined;
         while (zsdl3.pollEvent(&event)) {
             switch (event.type) {
@@ -73,10 +76,18 @@ pub fn wait(self: *Debugger) void {
 
         if (self.step_requested) {
             self.step_requested = false;
-            std.debug.print("SINGLE STEP\n", .{});
             _ = self.gbc.single_step();
         }
         self.render(renderer, font);
+
+        // limit frame rate to 60 FPS
+        const frame_end = zsdl3.getTicks();
+        const frame_time = frame_end - frame_start;
+
+        if (@as(f32, @floatFromInt(frame_time)) < MS_PER_FRAME) {
+            const sleep_ms: u64 = @intFromFloat(MS_PER_FRAME - @as(f32, @floatFromInt(frame_time)));
+            zsdl3.delay(@intCast(sleep_ms));
+        }
     }
 }
 

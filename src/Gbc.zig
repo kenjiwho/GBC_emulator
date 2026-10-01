@@ -231,6 +231,13 @@ pub fn run(self: *Gbc) !void {
             self.step_frame();
         }
         self.render();
+
+        // if the accumulator doesn't have enough time to trigger the next frame yet
+        // calculate how many nanoseconds to wait
+        if (accumulator < NS_PER_FRAME) {
+            const sleep_ns: u64 = @intFromFloat(NS_PER_FRAME - accumulator);
+            zsdl3.delay(@intCast(sleep_ns / 1_000_000));
+        }
     }
 }
 
