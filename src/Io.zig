@@ -59,7 +59,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
         0xFF4D => self.setKey1(value),
         0xFF4F => self.bus.vbk = @intCast(value & 0b1),
         0xFF50 => {
-            std.debug.print("Disabling boot rom\n", .{});
+            std.log.info("Disabling boot rom\n", .{});
             self.bus.boot_rom_enabled = false;
         }, // disable boot rom
         0xFF70 => self.bus.wbk = @min(value & 0b111, 1),

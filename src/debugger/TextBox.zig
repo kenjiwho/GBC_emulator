@@ -41,7 +41,7 @@ pub fn render(self: *TextBox, renderer: *zsdl3.SDL_Renderer, font: *zsdl3.ttf.TT
     const texture = zsdl3.createTextureFromSurface(renderer, surface) orelse return;
     defer zsdl3.destroyTexture(texture);
     // dynamically update scroll boundaries based on generated text height
-    self.updateContentHeight(@floatFromInt(surface.h));
+    self.update_content_height(@floatFromInt(surface.h));
 
     const dest_rect = zsdl3.SDL_FRect{
         .x = @floatFromInt(self.bounds.x),
@@ -52,7 +52,14 @@ pub fn render(self: *TextBox, renderer: *zsdl3.SDL_Renderer, font: *zsdl3.ttf.TT
     _ = zsdl3.renderTexture(renderer, texture, null, &dest_rect);
 }
 
-fn updateContentHeight(self: *TextBox, height: f32) void {
+pub fn resize(self: *TextBox, width: i32, height: i32) void {
+    self.bounds.w = width;
+    self.bounds.h = height;
+    self.max_scroll = @max(0, self.content_height - @as(f32, @floatFromInt(self.bounds.h)));
+    self.scroll_y = std.math.clamp(self.scroll_y, 0, self.max_scroll);
+}
+
+fn update_content_height(self: *TextBox, height: f32) void {
     self.content_height = height;
     self.max_scroll = @max(0, self.content_height - @as(f32, @floatFromInt(self.bounds.h)));
 }

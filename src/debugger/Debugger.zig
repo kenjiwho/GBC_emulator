@@ -70,6 +70,9 @@ pub fn wait(self: *Debugger) void {
                 },
                 zsdl3.SDL_EVENT_KEY_DOWN => self.handle_key_events(event.key.key),
                 zsdl3.SDL_EVENT_MOUSE_WHEEL => self.text_box.handleWheelEvent(event.wheel.y, event.wheel.mouse_x, event.wheel.mouse_y),
+                zsdl3.SDL_EVENT_WINDOW_RESIZED => {
+                    self.text_box.resize(event.window.data1 - 20, event.window.data2 - 20);
+                },
                 else => {},
             }
         }
