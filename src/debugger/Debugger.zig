@@ -119,10 +119,10 @@ fn render(self: *Debugger, renderer: *zsdl3.SDL_Renderer, font: *zsdl3.ttf.TTF_F
             @intFromBool(self.gbc.cpu.getFlag(.H)),
             @intFromBool(self.gbc.cpu.getFlag(.C)),
             self.gbc.cpu.regs.PC,
-            self.gbc.bus.read(self.gbc.cpu.regs.PC),
-            self.gbc.bus.read(self.gbc.cpu.regs.PC +% 1),
-            self.gbc.bus.read(self.gbc.cpu.regs.PC +% 2),
-            self.gbc.bus.read(self.gbc.cpu.regs.PC +% 3),
+            self.debug_read(self.gbc.cpu.regs.PC),
+            self.debug_read(self.gbc.cpu.regs.PC +% 1),
+            self.debug_read(self.gbc.cpu.regs.PC +% 2),
+            self.debug_read(self.gbc.cpu.regs.PC +% 3),
         },
     ) catch "Buffer too small";
 
@@ -139,4 +139,32 @@ fn handle_key_events(self: *Debugger, key: u32) void {
         zsdl3.SDLK_n => self.step_requested = true,
         else => {},
     }
+}
+
+pub fn debug_read(self: *Debugger, address: u16) u8 {
+    if (self.gbc.bus.boot_rom_enabled) {
+        if (address <= 0x00FF) {
+            return self.gbc.bus.boot_ROM[address]; // First 256 bytes
+        } else if (address >= 0x0100 and address <= 0x014F) {
+            return self.gbc.bus.ROM[address]; // Read from the game cartridge header
+        } else if (address >= 0x0200 and address <= 0x08FF) {
+            return self.gbc.bus.boot_ROM[address]; // second mapped region of CGB boot ROM
+        }
+    }
+
+    return switch (address) {
+        0x0000...0x3FFF => self.gbc.bus.ROM[address],
+        0x4000...0x7FFF => self.gbc.bus.ROM[self.gbc.bus.mbc.mapROMAddress(address)],
+        0x8000...0x9FFF => self.gbc.bus.ppu.read_vram_cpu(self.gbc.bus.vbk, address),
+        0xA000...0xBFFF => if (self.gbc.bus.mbc.ExternalRAM_enabled()) self.gbc.bus.external_RAM[address - 0xA000] else 0xFF,
+        0xC000...0xCFFF => self.gbc.bus.WRAM[address - 0xC000],
+        0xD000...0xDFFF => self.gbc.bus.WRAM[(address - 0xD000) + (@as(u16, self.gbc.bus.wbk) * 0x1000)],
+        0xE000...0xEFFF => self.gbc.bus.WRAM[address - 0xE000], // Echo RAM
+        0xF000...0xFDFF => self.gbc.bus.WRAM[(address - 0xF000) + (@as(u16, self.gbc.bus.wbk) * 0x1000)], // Echo RAM
+        0xFE00...0xFE9F => self.gbc.bus.ppu.read_oam_cpu(address),
+        0xFEA0...0xFEFF => 0, // Unusable
+        0xFF00...0xFF7F => self.gbc.bus.io.read(address),
+        0xFF80...0xFFFE => self.gbc.bus.HRAM[address - 0xFF80],
+        0xFFFF => self.gbc.bus.IE,
+    };
 }

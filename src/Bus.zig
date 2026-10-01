@@ -54,18 +54,15 @@ pub fn insert_boot_rom(self: *Bus, boot_rom: []const u8) void {
     self.boot_ROM = boot_rom;
 }
 
-const std = @import("std");
 pub fn read(self: *Bus, address: u16) u8 {
     self.timer.tick(); // advance timer on each read
 
     if (self.boot_rom_enabled) {
         if (address <= 0x00FF) {
-            // std.debug.print("Reading from boot rom: {x}\n", .{address});
             return self.boot_ROM[address]; // First 256 bytes
         } else if (address >= 0x0100 and address <= 0x014F) {
             return self.ROM[address]; // Read from the game cartridge header
         } else if (address >= 0x0200 and address <= 0x08FF) {
-            // std.debug.print("Reading from boot rom: {x}\n", .{address});
             return self.boot_ROM[address]; // second mapped region of CGB boot ROM
         }
     }
