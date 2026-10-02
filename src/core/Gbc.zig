@@ -3,7 +3,6 @@ const Gbc = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
-const zsdl3 = @import("zsdl3");
 const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
@@ -18,15 +17,11 @@ const DeviceMode = enum {
 
 const CPU_CLOCK_HZ = 4_194_304;
 const CYCLES_PER_FRAME = 70_224;
-const NS_PER_FRAME: f64 = @as(f64, CYCLES_PER_FRAME) * 1_000_000_000 / CPU_CLOCK_HZ;
 
 cpu: Cpu,
 ppu: Ppu,
 bus: Bus,
 dma: Dma,
-window: *zsdl3.SDL_Window = undefined,
-renderer: *zsdl3.SDL_Renderer = undefined,
-screen_texture: *zsdl3.SDL_Texture = undefined,
 device_mode: DeviceMode = undefined,
 
 debugger: Debugger,
@@ -78,6 +73,67 @@ fn load_boot_rom(self: *Gbc, io: Io, allocator: Allocator, boot_rom_file: []cons
 
     // read boot ROM into memory
     self.bus.insert_boot_rom(boot_rom);
+}
+
+/// Execute CPU and PPU steps for one frame
+pub fn step_frame(self: *Gbc) void {
+    var frame_cycles: usize = 0;
+    while (!self.ppu.frame_complete) {
+        if (self.debugger.is_paused) {
+            self.debugger.wait();
+        }
+
+        const system_cycles = self.single_step();
+        frame_cycles += system_cycles;
+
+        // if lcd is disabled, wait for 70224 cycles before breaking
+        if (!self.ppu.lcdc.lcd_ppu_enable and frame_cycles >= CYCLES_PER_FRAME) {
+            self.ppu.frame_complete = true;
+        }
+    }
+    self.ppu.frame_complete = false;
+}
+
+pub fn single_step(self: *Gbc) usize {
+    if (self.dma.counter > 0) {
+        self.dma.step();
+        std.debug.print("DMA TRANSFER HAPPENING\n", .{});
+    } else {
+        self.cpu.step() catch {
+            const opcode = self.bus.read(self.cpu.regs.PC - 1);
+            std.debug.print(
+                "CRASH opcode=${X} PC=${X} SP=${X} AF=${X} BC=${X} DE=${X} HL=${X}\n",
+                .{
+                    opcode,
+                    self.cpu.regs.PC - 1,
+                    self.cpu.regs.SP,
+                    self.cpu.regs.getAF(),
+                    self.cpu.regs.getBC(),
+                    self.cpu.regs.getDE(),
+                    self.cpu.regs.getHL(),
+                },
+            );
+            std.debug.print(
+                "stack: [{X:0>4}]={X} [{X:0>4}]={X}\n",
+                .{
+                    self.cpu.regs.SP,
+                    self.bus.read(self.cpu.regs.SP),
+                    self.cpu.regs.SP + 1,
+                    self.bus.read(self.cpu.regs.SP + 1),
+                },
+            );
+            std.process.exit(1);
+        };
+    }
+
+    const cycles = self.bus.timer.get_last_cycles();
+
+    // if double speed mode is enabled, each CPU cycle takes 2 system cycles
+    const is_double_speed = self.bus.io.getKey1().current_speed;
+    const system_cycles = if (is_double_speed) cycles / 2 else cycles;
+
+    self.ppu.step(system_cycles);
+    return system_cycles;
 }
 
 fn setup_boot_state(self: *Gbc) void {
@@ -168,164 +224,4 @@ fn setup_boot_state(self: *Gbc) void {
     self.bus.write(0xFFFF, 0x00); // IE
 
     self.bus.boot_rom_enabled = false; // disable boot ROM after setup
-}
-
-pub fn run(self: *Gbc) !void {
-    if (!zsdl3.init(zsdl3.SDL_INIT_VIDEO)) {
-        return error.SDLInitFailed;
-    }
-    defer zsdl3.quit();
-
-    // Main game window
-    self.window = zsdl3.createWindow(
-        "Game Boy Color Emulator",
-        Ppu.SCREEN_WIDTH * 2,
-        Ppu.SCREEN_HEIGHT * 2,
-        zsdl3.SDL_WINDOW_RESIZABLE,
-    ) orelse return;
-    defer zsdl3.destroyWindow(self.window);
-
-    // renderer for the game window
-    self.renderer = zsdl3.createRenderer(self.window, null) orelse return error.SDLRendererFailed;
-    defer zsdl3.destroyRenderer(self.renderer);
-    // gbc screen should not stretch to fill the window
-    _ = zsdl3.setRenderLogicalPresentation(
-        self.renderer,
-        Ppu.SCREEN_WIDTH,
-        Ppu.SCREEN_HEIGHT,
-        zsdl3.SDL_LOGICAL_PRESENTATION_LETTERBOX,
-    );
-
-    self.screen_texture = zsdl3.createTexture(
-        self.renderer,
-        zsdl3.SDL_PIXELFORMAT_ARGB8888,
-        zsdl3.SDL_TEXTUREACCESS_STREAMING,
-        Ppu.SCREEN_WIDTH,
-        Ppu.SCREEN_HEIGHT,
-    ) orelse return error.SDLTextureFailed;
-    defer zsdl3.destroyTexture(self.screen_texture);
-    // No blurring between pixels
-    _ = zsdl3.setTextureScaleMode(self.screen_texture, zsdl3.SDL_SCALEMODE_NEAREST);
-
-    var event: zsdl3.SDL_Event = undefined;
-    var quit: bool = false;
-    var last_time = zsdl3.getTicksNS();
-    var accumulator: f64 = 0; // accumulator for frame timing
-    while (!quit) {
-        while (zsdl3.pollEvent(&event)) {
-            switch (event.type) {
-                zsdl3.SDL_EVENT_QUIT => quit = true,
-                zsdl3.SDL_EVENT_KEY_DOWN => self.handle_key_events(event.key.key),
-                else => {},
-            }
-        }
-
-        const current_time = zsdl3.getTicksNS();
-        var delta: f64 = @floatFromInt(current_time - last_time);
-        // clamp delta to avoid the emulator trying to catch up when the window was paused
-        if (delta >= 100_000_000) delta = NS_PER_FRAME;
-        accumulator += delta;
-        last_time = current_time;
-
-        while (accumulator >= NS_PER_FRAME) : (accumulator -= NS_PER_FRAME) {
-            self.step_frame();
-        }
-        self.render();
-
-        // if the accumulator doesn't have enough time to trigger the next frame yet
-        // calculate how many nanoseconds to wait
-        if (accumulator < NS_PER_FRAME) {
-            const sleep_ns: u64 = @intFromFloat(NS_PER_FRAME - accumulator);
-            zsdl3.delay(@intCast(sleep_ns / 1_000_000));
-        }
-    }
-}
-
-/// Execute CPU and PPU steps for one frame
-fn step_frame(self: *Gbc) void {
-    var frame_cycles: usize = 0;
-    while (!self.ppu.frame_complete) {
-        if (self.debugger.is_paused) {
-            self.debugger.wait();
-        }
-
-        const system_cycles = self.single_step();
-        frame_cycles += system_cycles;
-
-        // if lcd is disabled, wait for 70224 cycles before breaking
-        if (!self.ppu.lcdc.lcd_ppu_enable and frame_cycles >= CYCLES_PER_FRAME) {
-            self.ppu.frame_complete = true;
-        }
-    }
-    self.ppu.frame_complete = false;
-}
-
-pub fn single_step(self: *Gbc) usize {
-    if (self.dma.counter > 0) {
-        self.dma.step();
-        std.debug.print("DMA TRANSFER HAPPENING\n", .{});
-    } else {
-        self.cpu.step() catch {
-            const opcode = self.bus.read(self.cpu.regs.PC - 1);
-            std.debug.print(
-                "CRASH opcode=${X} PC=${X} SP=${X} AF=${X} BC=${X} DE=${X} HL=${X}\n",
-                .{
-                    opcode,
-                    self.cpu.regs.PC - 1,
-                    self.cpu.regs.SP,
-                    self.cpu.regs.getAF(),
-                    self.cpu.regs.getBC(),
-                    self.cpu.regs.getDE(),
-                    self.cpu.regs.getHL(),
-                },
-            );
-            std.debug.print(
-                "stack: [{X:0>4}]={X} [{X:0>4}]={X}\n",
-                .{
-                    self.cpu.regs.SP,
-                    self.bus.read(self.cpu.regs.SP),
-                    self.cpu.regs.SP + 1,
-                    self.bus.read(self.cpu.regs.SP + 1),
-                },
-            );
-            std.process.exit(1);
-        };
-    }
-
-    const cycles = self.bus.timer.get_last_cycles();
-
-    // if double speed mode is enabled, each CPU cycle takes 2 system cycles
-    const is_double_speed = self.bus.io.getKey1().current_speed;
-    const system_cycles = if (is_double_speed) cycles / 2 else cycles;
-
-    self.ppu.step(system_cycles);
-    return system_cycles;
-}
-
-/// Render the current screen to the window
-pub fn render(self: *const Gbc) void {
-    _ = zsdl3.renderClear(self.renderer);
-
-    _ = zsdl3.updateTexture(
-        self.screen_texture,
-        null, // null means whole texture
-        &self.ppu.screen,
-        Ppu.SCREEN_WIDTH * 4, // pitch (bytes per row) = width * 4 (bytes per pixel)
-    );
-
-    _ = zsdl3.renderTexture(
-        self.renderer,
-        self.screen_texture,
-        null, // src rect (null means whole texture)
-        null, // dest rect (null means whole window)
-    );
-
-    _ = zsdl3.renderPresent(self.renderer);
-}
-
-fn handle_key_events(self: *Gbc, key: u32) void {
-    switch (key) {
-        zsdl3.SDLK_SPACE => self.debugger.is_paused = true,
-        else => {},
-    }
 }

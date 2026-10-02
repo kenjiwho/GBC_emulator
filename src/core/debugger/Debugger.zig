@@ -130,7 +130,7 @@ fn render(self: *Debugger, renderer: *zsdl3.SDL_Renderer, font: *zsdl3.ttf.TTF_F
     self.text_box.render(renderer, font);
 
     _ = zsdl3.renderPresent(renderer);
-    self.gbc.render();
+    // self.gbc.render();
 }
 
 fn handle_key_events(self: *Debugger, key: u32) void {
