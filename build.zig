@@ -25,8 +25,8 @@ pub fn build(b: *std.Build) void {
         manage_dependencies_windows(b, target, optimize, exe);
         manage_dependencies_windows(b, target, optimize, exe_check);
     } else {
-        manage_dependencies(b, exe);
-        manage_dependencies(b, exe_check);
+        manage_dependencies(b, target, optimize, exe);
+        manage_dependencies(b, target, optimize, exe_check);
     }
 
     b.installArtifact(exe);
@@ -55,10 +55,18 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
 }
 
-fn manage_dependencies(b: *std.Build, exe: *std.Build.Step.Compile) void {
-    const zsdl3 = b.dependency("zsdl3", .{});
+fn manage_dependencies(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, exe: *std.Build.Step.Compile) void {
+    // prevent sframe relocation error
+    exe.use_llvm = true;
+    exe.use_lld = true;
+
+    const zsdl3 = b.dependency("zsdl3", .{
+        .target = target,
+        .optimize = optimize,
+    });
     exe.root_module.addImport("zsdl3", zsdl3.module("zsdl3"));
     exe.root_module.linkSystemLibrary("SDL3", .{});
+    exe.root_module.linkSystemLibrary("SDL3_ttf", .{});
 }
 
 fn manage_dependencies_windows(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, exe: *std.Build.Step.Compile) void {
