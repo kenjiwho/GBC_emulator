@@ -15,32 +15,42 @@ gbc: *Gbc,
 window_manager: WindowManager,
 
 quit: bool = false,
+is_paused: bool = false,
 
-pub fn init(io: Io, allocator: Allocator) !App {
+pub fn init(io: Io, gpa: Allocator) !App {
     const gbc = try Gbc.init(
         io,
-        allocator,
+        gpa,
         "./tests/cgb-acid2.gbc",
         "./tests/gbc_bios.bin",
     );
 
     return App{
         .gbc = gbc,
-        .window_manager = try WindowManager.init(allocator, gbc),
+        .window_manager = try WindowManager.init(gpa, gbc),
     };
 }
 
-pub fn deinit(self: *App, allocator: Allocator) void {
-    self.gbc.deinit(allocator);
-    self.window_manager.deinit(allocator);
+pub fn deinit(self: *App, gpa: Allocator) void {
+    self.gbc.deinit(gpa);
+    self.window_manager.deinit(gpa);
 }
 
 /// Main loop
-pub fn run(self: *App) !void {
+pub fn run(self: *App, gpa: Allocator) !void {
     var last_time = zsdl3.getTicksNS();
     var accumulator: f64 = 0; // accumulator for frame timing
     while (!self.quit) {
-        self.quit = self.window_manager.process_events();
+        const actions = self.window_manager.process_events();
+
+        self.quit = actions.quit;
+        if (actions.toggle_debug) {
+            self.is_paused = !self.is_paused;
+            try self.window_manager.toggle_debug(gpa);
+        }
+        if (actions.single_step and self.is_paused) {
+            _ = self.gbc.single_step();
+        }
 
         const current_time = zsdl3.getTicksNS();
         var delta: f64 = @floatFromInt(current_time - last_time);
@@ -50,7 +60,9 @@ pub fn run(self: *App) !void {
         last_time = current_time;
 
         while (accumulator >= NS_PER_FRAME) : (accumulator -= NS_PER_FRAME) {
-            self.gbc.step_frame();
+            if (!self.is_paused) {
+                self.gbc.next_frame();
+            }
         }
         self.window_manager.render_all();
 

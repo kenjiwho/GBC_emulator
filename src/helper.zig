@@ -11,7 +11,7 @@ pub fn sumArray(comptime T: type, arr: []const T) T {
     return sum;
 }
 
-pub fn readFile(io: Io, allocator: Allocator, file_path: []const u8) ![]u8 {
+pub fn readFile(io: Io, gpa: Allocator, file_path: []const u8) ![]u8 {
     const cwd = Io.Dir.cwd();
     const file = try cwd.openFile(io, file_path, .{ .mode = .read_only });
     defer file.close(io);
@@ -20,7 +20,7 @@ pub fn readFile(io: Io, allocator: Allocator, file_path: []const u8) ![]u8 {
     var buffer: [4096]u8 = undefined;
     var file_reader = file.reader(io, &buffer);
 
-    const data = try allocator.alloc(u8, file_size);
+    const data = try gpa.alloc(u8, file_size);
 
     file_reader.interface.readSliceAll(data) catch |err| {
         std.log.err("read failed: {}\n", .{err});

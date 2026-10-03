@@ -7,7 +7,6 @@ const Cpu = @import("cpu/Cpu.zig");
 const Bus = @import("Bus.zig");
 const Ppu = @import("ppu/Ppu.zig");
 const Dma = @import("Dma.zig");
-const Debugger = @import("debugger/Debugger.zig");
 const helper = @import("../helper.zig");
 
 const DeviceMode = enum {
@@ -24,30 +23,26 @@ bus: Bus,
 dma: Dma,
 device_mode: DeviceMode = undefined,
 
-debugger: Debugger,
-
-pub fn init(io: Io, allocator: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
+pub fn init(io: Io, gpa: Allocator, rom: []const u8, boot_rom: []const u8) !*Gbc {
     // put GB instance on heap so self-references work
-    const gbc = try allocator.create(Gbc);
-    errdefer allocator.destroy(gbc);
+    const gbc = try gpa.create(Gbc);
+    errdefer gpa.destroy(gbc);
 
     // init modules
     const bus = Bus.init(gbc);
     const cpu = Cpu.init(&gbc.bus);
     const ppu = Ppu.init(&gbc.bus);
     const dma = Dma.init(&gbc.bus, &gbc.ppu);
-    const debugger = Debugger.init(gbc);
 
     gbc.* = Gbc{
         .cpu = cpu,
         .ppu = ppu,
         .bus = bus,
         .dma = dma,
-        .debugger = debugger,
     };
 
-    try gbc.load_rom(io, allocator, rom);
-    try gbc.load_boot_rom(io, allocator, boot_rom);
+    try gbc.load_rom(io, gpa, rom);
+    try gbc.load_boot_rom(io, gpa, boot_rom);
     // set device mode based on ROM header
     gbc.device_mode = if (gbc.bus.ROM[0x143] == 0x80 or gbc.bus.ROM[0x143] == 0xC0) .CGB else .DMG;
     // gbc.setup_boot_state();
@@ -55,34 +50,30 @@ pub fn init(io: Io, allocator: Allocator, rom: []const u8, boot_rom: []const u8)
     return gbc;
 }
 
-pub fn deinit(self: *Gbc, allocator: Allocator) void {
-    allocator.free(self.bus.ROM);
-    allocator.free(self.bus.boot_ROM);
-    allocator.destroy(self);
+pub fn deinit(self: *Gbc, gpa: Allocator) void {
+    gpa.free(self.bus.ROM);
+    gpa.free(self.bus.boot_ROM);
+    gpa.destroy(self);
 }
 
-fn load_rom(self: *Gbc, io: Io, allocator: Allocator, rom_file: []const u8) !void {
-    const rom = try helper.readFile(io, allocator, rom_file);
+fn load_rom(self: *Gbc, io: Io, gpa: Allocator, rom_file: []const u8) !void {
+    const rom = try helper.readFile(io, gpa, rom_file);
 
     // read ROM into memory
     self.bus.insert_rom(rom);
 }
 
-fn load_boot_rom(self: *Gbc, io: Io, allocator: Allocator, boot_rom_file: []const u8) !void {
-    const boot_rom = try helper.readFile(io, allocator, boot_rom_file);
+fn load_boot_rom(self: *Gbc, io: Io, gpa: Allocator, boot_rom_file: []const u8) !void {
+    const boot_rom = try helper.readFile(io, gpa, boot_rom_file);
 
     // read boot ROM into memory
     self.bus.insert_boot_rom(boot_rom);
 }
 
 /// Execute CPU and PPU steps for one frame
-pub fn step_frame(self: *Gbc) void {
+pub fn next_frame(self: *Gbc) void {
     var frame_cycles: usize = 0;
     while (!self.ppu.frame_complete) {
-        if (self.debugger.is_paused) {
-            self.debugger.wait();
-        }
-
         const system_cycles = self.single_step();
         frame_cycles += system_cycles;
 

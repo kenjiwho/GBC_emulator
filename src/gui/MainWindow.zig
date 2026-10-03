@@ -4,6 +4,7 @@ const MainWindow = @This();
 const zsdl3 = @import("zsdl3");
 
 const Ppu = @import("../core/ppu/Ppu.zig");
+const AppActions = @import("WindowManager.zig").AppActions;
 
 window: *zsdl3.SDL_Window = undefined,
 renderer: *zsdl3.SDL_Renderer = undefined,
@@ -56,9 +57,20 @@ pub fn get_id(self: *const MainWindow) u32 {
     return zsdl3.getWindowID(self.window);
 }
 
-pub fn handle_event(self: *MainWindow, event: zsdl3.SDL_Event) void {
+pub fn handle_event(self: *MainWindow, event: zsdl3.SDL_Event) AppActions {
     _ = self;
-    _ = event;
+    var actions = AppActions{};
+    switch (event.type) {
+        zsdl3.SDL_EVENT_WINDOW_CLOSE_REQUESTED => actions.quit = true,
+        zsdl3.SDL_EVENT_KEY_DOWN => {
+            switch (event.key.key) {
+                zsdl3.SDLK_ESCAPE => actions.toggle_debug = true,
+                else => {},
+            }
+        },
+        else => {},
+    }
+    return actions;
 }
 
 pub fn render(self: *const MainWindow) void {

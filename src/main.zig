@@ -10,7 +10,7 @@ pub fn main(init: std.process.Init) !void {
 
     var app = try App.init(io, gpa);
     defer app.deinit(gpa);
-    try app.run();
+    try app.run(gpa);
 }
 
 test {
