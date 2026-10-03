@@ -160,7 +160,7 @@ fn increment_ly(self: *Ppu) void {
     self.check_interrupts();
 }
 
-fn check_interrupts(self: *Ppu) void {
+fn check_interrupts(self: *const Ppu) void {
     // Mode interrupts
     const mode_interrupt = switch (self.stat.ppu_mode) {
         .hblank => self.stat.mode0_interrupt,

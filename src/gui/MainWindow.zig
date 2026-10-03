@@ -46,13 +46,22 @@ pub fn init(screen: []const u32) !MainWindow {
     return main_window;
 }
 
-pub fn deinit(self: *MainWindow) void {
-    zsdl3.destroyWindow(self.window);
-    zsdl3.destroyRenderer(self.renderer);
+pub fn deinit(self: *const MainWindow) void {
     zsdl3.destroyTexture(self.screen_texture);
+    zsdl3.destroyRenderer(self.renderer);
+    zsdl3.destroyWindow(self.window);
 }
 
-pub fn render(self: *MainWindow) void {
+pub fn get_id(self: *const MainWindow) u32 {
+    return zsdl3.getWindowID(self.window);
+}
+
+pub fn handle_event(self: *MainWindow, event: zsdl3.SDL_Event) void {
+    _ = self;
+    _ = event;
+}
+
+pub fn render(self: *const MainWindow) void {
     _ = zsdl3.renderClear(self.renderer);
 
     _ = zsdl3.updateTexture(

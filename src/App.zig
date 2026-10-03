@@ -26,13 +26,13 @@ pub fn init(io: Io, allocator: Allocator) !App {
 
     return App{
         .gbc = gbc,
-        .window_manager = try WindowManager.init(gbc),
+        .window_manager = try WindowManager.init(allocator, gbc),
     };
 }
 
 pub fn deinit(self: *App, allocator: Allocator) void {
     self.gbc.deinit(allocator);
-    self.window_manager.deinit();
+    self.window_manager.deinit(allocator);
 }
 
 /// Main loop
@@ -52,7 +52,7 @@ pub fn run(self: *App) !void {
         while (accumulator >= NS_PER_FRAME) : (accumulator -= NS_PER_FRAME) {
             self.gbc.step_frame();
         }
-        self.window_manager.render();
+        self.window_manager.render_all();
 
         // if the accumulator doesn't have enough time to trigger the next frame yet
         // calculate how many nanoseconds to wait

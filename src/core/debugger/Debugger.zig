@@ -4,7 +4,7 @@ const Debugger = @This();
 const std = @import("std");
 const zsdl3 = @import("zsdl3");
 const Gbc = @import("../Gbc.zig");
-const TextBox = @import("../../gui/Widgets/TextBox.zig");
+const TextBox = @import("../../gui/widgets/TextBox.zig");
 
 const FONT_DATA: []const u8 = @embedFile("../../assets/fonts/JetBrainsMonoNL-Regular.ttf");
 const MS_PER_FRAME = 1000.0 / 60.0; // 60 FPS

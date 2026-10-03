@@ -105,7 +105,7 @@ fn try_push(self: *Fetcher, ppu: *Ppu) bool {
 }
 
 /// Converts a tile index to its corresponding address in VRAM
-fn tile_index_to_address(self: *const Fetcher, ppu: *Ppu) u16 {
+fn tile_index_to_address(self: *const Fetcher, ppu: *const Ppu) u16 {
     const window_y = if (self.inside_window) self.wl_internal else 0;
 
     const base = 0x8000;
