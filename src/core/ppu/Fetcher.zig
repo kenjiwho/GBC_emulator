@@ -36,7 +36,6 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             self.current_task = .get_tile_data_high;
             const address = self.tile_index_to_address(ppu);
 
-            // TODO: handle vertical flip
             self.tile_data_low = ppu.read_vram(self.tile_attributes.vram_bank, address);
             return 2;
         },
@@ -44,7 +43,6 @@ pub fn tick(self: *Fetcher, ppu: *Ppu) usize {
             self.current_task = .sleep;
             const address = self.tile_index_to_address(ppu) + 1;
 
-            // TODO: handle vertical flip
             self.tile_data_high = ppu.read_vram(self.tile_attributes.vram_bank, address);
 
             // The high-plane phase is also a push opportunity.

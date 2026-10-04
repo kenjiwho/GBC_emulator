@@ -7,6 +7,7 @@ const ArrayList = std.ArrayList;
 const zsdl3 = @import("zsdl3");
 const MainWindow = @import("MainWindow.zig");
 const CpuWindow = @import("CpuWindow.zig");
+const TileWindow = @import("TileWindow.zig");
 const Gbc = @import("../core/Gbc.zig");
 
 const FONT_DATA: []const u8 = @embedFile("../assets/fonts/JetBrainsMonoNL-Regular.ttf");
@@ -16,11 +17,18 @@ pub const AppActions = struct {
     quit: bool = false,
     toggle_debug: bool = false,
     single_step: bool = false,
+
+    pub fn merge(self: *AppActions, other: AppActions) void {
+        self.quit = self.quit or other.quit;
+        self.toggle_debug = self.toggle_debug or other.toggle_debug;
+        self.single_step = self.single_step or other.single_step;
+    }
 };
 
 const Window = union(enum) {
     main: MainWindow,
     cpu: CpuWindow,
+    tile: TileWindow,
 
     pub fn deinit(self: *const Window) void {
         switch (self.*) {
@@ -104,9 +112,7 @@ pub fn process_events(self: *WindowManager) AppActions {
         for (self.windows.items) |*win| {
             if (target_id == win.get_id()) {
                 const win_actions = win.handle_event(event);
-                actions.quit |= win_actions.quit;
-                actions.toggle_debug |= win_actions.toggle_debug;
-                actions.single_step |= win_actions.single_step;
+                actions.merge(win_actions);
                 break;
             }
         }
@@ -118,16 +124,25 @@ pub fn toggle_debug(self: *WindowManager, gpa: Allocator) !void {
     self.debug_mode = !self.debug_mode;
 
     if (self.debug_mode) {
+        // create debug windows
         const cpu_window = try CpuWindow.init(self.gbc, self.font);
+        const tile_window = try TileWindow.init(self.gbc);
         try self.windows.append(gpa, .{ .cpu = cpu_window });
+        try self.windows.append(gpa, .{ .tile = tile_window });
     } else {
-        for (0.., self.windows.items) |i, win| {
-            switch (win) {
+        // destroy debug windows
+        var i: usize = 0;
+        while (i < self.windows.items.len) {
+            switch (self.windows.items[i]) {
                 .cpu => |*cpu_win| {
                     cpu_win.deinit();
                     _ = self.windows.swapRemove(i);
                 },
-                else => {},
+                .tile => |*tile_win| {
+                    tile_win.deinit();
+                    _ = self.windows.swapRemove(i);
+                },
+                else => i += 1,
             }
         }
     }

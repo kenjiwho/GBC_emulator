@@ -36,7 +36,6 @@ pub fn push(self: *Fifo, tile_data_low: u8, tile_data_high: u8, attributes: OamA
     }
 }
 
-// TODO: add pallette attribute
 /// Mixes row of 8 pixels with existing pixels in FIFO
 pub fn mix(self: *Fifo, tile_data_low: u8, tile_data_high: u8, attributes: OamAttributes) void {
     for (0..8) |i| {

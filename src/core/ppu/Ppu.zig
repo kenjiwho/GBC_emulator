@@ -70,19 +70,10 @@ pub fn step(self: *Ppu, cycles: usize) void {
                     }
                     self.inside_window = self.wy_trigger and self.lcdc.window_enable;
                     self.stat.ppu_mode = .drawing;
-                    // std.debug.print("######################\n", .{});
-                    // std.debug.print("OAM BUFFER: {any}\n\n\n", .{self.oam_buffer[0..self.oam_count]});
-                    // std.debug.print("OAM: {any}\n", .{self.OAM});
                 }
             },
             .drawing => { // 172 - 289 dots
                 const dots = self.fetcher.tick(self);
-                // if (self.ly == 0) {
-                //     std.debug.print(
-                //         "LY={d} task={any} lcd_x={d} fifo={d}\n",
-                //         .{ self.ly, self.fetcher.current_task, self.lcd_x, self.fifo_bg.count },
-                //     );
-                // }
                 dots_used += dots;
                 self.total_dots += dots;
 
@@ -402,7 +393,7 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
     }
 }
 
-fn resolve_cgb_color(self: *const Ppu, color_idx: u2, palette_idx: u3, is_obj: bool) u32 {
+pub fn resolve_cgb_color(self: *const Ppu, color_idx: u2, palette_idx: u3, is_obj: bool) u32 {
     const ram = if (is_obj) &self.obj_CRAM else &self.bg_CRAM;
     const base_addr = (@as(usize, palette_idx) * 8) + (@as(usize, color_idx) * 2);
     const color_data = @as(u16, ram[base_addr]) | (@as(u16, ram[base_addr + 1]) << 8);
