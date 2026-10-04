@@ -16,7 +16,7 @@ pub fn init(x: c_int, y: c_int, w: c_int, h: c_int) TextBox {
     };
 }
 
-pub fn handleWheelEvent(self: *TextBox, wheel_y: f32, mouse_x: f32, mouse_y: f32) void {
+pub fn handle_wheel_event(self: *TextBox, wheel_y: f32, mouse_x: f32, mouse_y: f32) void {
     // Check if mouse is hovering inside the bounds
     const is_inside = mouse_x >= @as(f32, @floatFromInt(self.bounds.x)) and mouse_x <= @as(f32, @floatFromInt(self.bounds.x + self.bounds.w)) and
         mouse_y >= @as(f32, @floatFromInt(self.bounds.y)) and mouse_y <= @as(f32, @floatFromInt(self.bounds.y + self.bounds.h));

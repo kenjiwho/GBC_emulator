@@ -45,11 +45,19 @@ pub fn get_id(self: *const CpuWindow) u32 {
     return zsdl3.getWindowID(self.window);
 }
 
-pub fn handle_event(self: *const CpuWindow, event: zsdl3.SDL_Event) AppActions {
-    _ = self;
+pub fn handle_event(self: *CpuWindow, event: zsdl3.SDL_Event) AppActions {
     var actions = AppActions{};
     switch (event.type) {
         zsdl3.SDL_EVENT_WINDOW_CLOSE_REQUESTED => actions.toggle_debug = true,
+        zsdl3.SDL_EVENT_WINDOW_RESIZED => self.text_box.resize(
+            event.window.data1 - 20,
+            event.window.data2 - 20,
+        ),
+        zsdl3.SDL_EVENT_MOUSE_WHEEL => self.text_box.handle_wheel_event(
+            event.wheel.y,
+            event.wheel.mouse_x,
+            event.wheel.mouse_y,
+        ),
         zsdl3.SDL_EVENT_KEY_DOWN => {
             switch (event.key.key) {
                 zsdl3.SDLK_n => actions.single_step = true,
