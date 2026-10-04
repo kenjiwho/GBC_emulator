@@ -123,10 +123,18 @@ pub fn process_events(self: *WindowManager) AppActions {
 pub fn toggle_debug(self: *WindowManager, gpa: Allocator) !void {
     self.debug_mode = !self.debug_mode;
 
+    // at least one of the windows items is the main window
+    const main_window = for (self.windows.items) |win| {
+        switch (win) {
+            .main => |main_win| break main_win.window,
+            else => {},
+        }
+    } else unreachable;
+
     if (self.debug_mode) {
         // create debug windows
-        const cpu_window = try CpuWindow.init(self.gbc, self.font);
-        const tile_window = try TileWindow.init(self.gbc);
+        const cpu_window = try CpuWindow.init(self.gbc, main_window, self.font);
+        const tile_window = try TileWindow.init(self.gbc, main_window);
         try self.windows.append(gpa, .{ .cpu = cpu_window });
         try self.windows.append(gpa, .{ .tile = tile_window });
     } else {

@@ -20,15 +20,17 @@ renderer: *zsdl3.SDL_Renderer = undefined,
 texture: *zsdl3.SDL_Texture = undefined,
 pixels: [PIXEL_WIDTH * PIXEL_HEIGHT]u32 = @splat(GRID_COLOR),
 
-pub fn init(gbc: *Gbc) !TileWindow {
+pub fn init(gbc: *Gbc, parent_window: *zsdl3.SDL_Window) !TileWindow {
     var tile_window = TileWindow{ .gbc = gbc };
 
     tile_window.window = zsdl3.createWindow(
         "Tile window",
-        PIXEL_WIDTH,
-        PIXEL_HEIGHT,
-        zsdl3.SDL_WINDOW_RESIZABLE,
+        PIXEL_WIDTH * 3,
+        PIXEL_HEIGHT * 3,
+        zsdl3.SDL_WINDOW_RESIZABLE | zsdl3.SDL_WINDOW_HIDDEN,
     ) orelse return error.SDLWindowFailed;
+    _ = zsdl3.video.setWindowParent(tile_window.window, parent_window);
+    _ = zsdl3.showWindow(tile_window.window);
 
     tile_window.renderer = zsdl3.createRenderer(tile_window.window, null) orelse return error.SDLRendererFailed;
     _ = zsdl3.setRenderLogicalPresentation(

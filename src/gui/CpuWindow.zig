@@ -14,9 +14,9 @@ text_box: TextBox,
 text_buffer: [4096]u8 = undefined,
 font: *zsdl3.ttf.TTF_Font,
 
-pub fn init(gbc: *Gbc, font: *zsdl3.ttf.TTF_Font) !CpuWindow {
-    const window_height = 640;
-    const window_width = 640;
+pub fn init(gbc: *Gbc, parent_window: *zsdl3.SDL_Window, font: *zsdl3.ttf.TTF_Font) !CpuWindow {
+    const window_height = 320;
+    const window_width = 320;
 
     var cpu_window = CpuWindow{
         .gbc = gbc,
@@ -28,8 +28,10 @@ pub fn init(gbc: *Gbc, font: *zsdl3.ttf.TTF_Font) !CpuWindow {
         "Cpu window",
         window_width,
         window_height,
-        zsdl3.SDL_WINDOW_RESIZABLE,
+        zsdl3.SDL_WINDOW_RESIZABLE | zsdl3.SDL_WINDOW_HIDDEN,
     ) orelse return error.SDLWindowFailed;
+    _ = zsdl3.video.setWindowParent(cpu_window.window, parent_window);
+    _ = zsdl3.showWindow(cpu_window.window);
 
     cpu_window.renderer = zsdl3.createRenderer(cpu_window.window, null) orelse return error.SDLRendererFailed;
 
