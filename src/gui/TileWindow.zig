@@ -1,6 +1,7 @@
 //! Views all VRAM tiles in one view
 const TileWindow = @This();
 
+const Allocator = @import("std").mem.Allocator;
 const zsdl3 = @import("zsdl3");
 const Gbc = @import("../core/Gbc.zig");
 const AppActions = @import("WindowManager.zig").AppActions;
@@ -18,10 +19,13 @@ gbc: *Gbc,
 window: *zsdl3.SDL_Window = undefined,
 renderer: *zsdl3.SDL_Renderer = undefined,
 texture: *zsdl3.SDL_Texture = undefined,
-pixels: [PIXEL_WIDTH * PIXEL_HEIGHT]u32 = @splat(GRID_COLOR),
+pixels: []u32,
 
-pub fn init(gbc: *Gbc, parent_window: *zsdl3.SDL_Window) !TileWindow {
-    var tile_window = TileWindow{ .gbc = gbc };
+pub fn init(gpa: Allocator, gbc: *Gbc, parent_window: *zsdl3.SDL_Window) !TileWindow {
+    const pixels = try gpa.alloc(u32, PIXEL_WIDTH * PIXEL_HEIGHT);
+    @memset(pixels, GRID_COLOR);
+
+    var tile_window = TileWindow{ .gbc = gbc, .pixels = pixels };
 
     tile_window.window = zsdl3.createWindow(
         "Tile window",
@@ -52,7 +56,8 @@ pub fn init(gbc: *Gbc, parent_window: *zsdl3.SDL_Window) !TileWindow {
     return tile_window;
 }
 
-pub fn deinit(self: *const TileWindow) void {
+pub fn deinit(self: *const TileWindow, gpa: Allocator) void {
+    gpa.free(self.pixels);
     zsdl3.destroyTexture(self.texture);
     zsdl3.destroyRenderer(self.renderer);
     zsdl3.destroyWindow(self.window);
@@ -129,7 +134,7 @@ pub fn render(self: *TileWindow) void {
     }
 
     _ = zsdl3.renderClear(self.renderer);
-    _ = zsdl3.updateTexture(self.texture, null, &self.pixels, PIXEL_WIDTH * 4);
+    _ = zsdl3.updateTexture(self.texture, null, self.pixels.ptr, PIXEL_WIDTH * 4);
     _ = zsdl3.renderTexture(self.renderer, self.texture, null, null);
     _ = zsdl3.renderPresent(self.renderer);
 }

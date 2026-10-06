@@ -30,8 +30,9 @@ const Window = union(enum) {
     cpu: CpuWindow,
     tile: TileWindow,
 
-    pub fn deinit(self: *const Window) void {
+    pub fn deinit(self: *const Window, gpa: Allocator) void {
         switch (self.*) {
+            .tile => |*tile_win| tile_win.deinit(gpa),
             inline else => |*w| w.deinit(),
         }
     }
@@ -85,7 +86,7 @@ pub fn init(gpa: Allocator, gbc: *Gbc) !WindowManager {
 
 pub fn deinit(self: *WindowManager, gpa: Allocator) void {
     for (self.windows.items) |win| {
-        win.deinit();
+        win.deinit(gpa);
     }
     self.windows.deinit(gpa);
     zsdl3.ttf.closeFont(self.font);
@@ -134,7 +135,7 @@ pub fn toggle_debug(self: *WindowManager, gpa: Allocator) !void {
     if (self.debug_mode) {
         // create debug windows
         const cpu_window = try CpuWindow.init(self.gbc, main_window, self.font);
-        const tile_window = try TileWindow.init(self.gbc, main_window);
+        const tile_window = try TileWindow.init(gpa, self.gbc, main_window);
         try self.windows.append(gpa, .{ .cpu = cpu_window });
         try self.windows.append(gpa, .{ .tile = tile_window });
     } else {
@@ -147,7 +148,7 @@ pub fn toggle_debug(self: *WindowManager, gpa: Allocator) !void {
                     _ = self.windows.swapRemove(i);
                 },
                 .tile => |*tile_win| {
-                    tile_win.deinit();
+                    tile_win.deinit(gpa);
                     _ = self.windows.swapRemove(i);
                 },
                 else => i += 1,
