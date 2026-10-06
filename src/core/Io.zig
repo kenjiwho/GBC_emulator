@@ -30,13 +30,22 @@ pub fn init(bus: *Bus) Io {
 
 pub fn read(self: *const Io, address: u16) u8 {
     return switch (address) {
-        0xFF00 => self.getJoyp(),
-        0xFF04...0xFF07 => self.bus.timer.read(address),
-        0xFF0F => self.getIF(),
-        0xFF40...0xFF4B, 0xFF68...0xFF6B => self.bus.ppu.read(address),
+        0xFF00 => self.getJoyp(), // Joypad input
+        0xFF01...0xFF02 => self.IOPorts[address - 0xFF00], // TODO: implement Serial transfer
+        0xFF04...0xFF07 => self.bus.timer.read(address), // Timer and divider
+        0xFF0F => self.getIF(), // Interrupts
+        0xFF10...0xFF26 => self.IOPorts[address - 0xFF00], // TODO: implement Audio
+        0xFF30...0xFF3F => self.IOPorts[address - 0xFF00], // TODO: implement Wave pattern
+        0xFF40...0xFF4B => self.bus.ppu.read(address), // LCD Control, Status, Position, Scrolling, and Palettes
+        0xFF4C => self.IOPorts[0x4C], // TODO: implement KEY0
         0xFF4D => self.IOPorts[0x4D], // KEY1
-        0xFF4F => @as(u8, self.bus.vbk) | 0xFE, // VBK (bit 0) + unused bits read as 1
-        0xFF70 => self.bus.wbk,
+        0xFF4F => @as(u8, self.bus.vbk) | 0xFE, // VRAM Bank Select (bit 0) + unused bits read as 1
+        0xFF50 => @as(u8, self.bus.wbk) | 0xF8, // TODO: implement Boot ROM mapping control
+        0xFF51...0xFF55 => self.IOPorts[address - 0xFF00], // TODO: implement VRAM DMA
+        0xFF56 => self.IOPorts[address - 0xFF00], // TODO: implement IR port
+        0xFF68...0xFF6B => self.bus.ppu.read(address), // BG / OBJ Palettes
+        0xFF6C => self.IOPorts[0x6C], // TODO: implement Object priority mode
+        0xFF70 => self.bus.wbk, // WRAM Bank Select
         else => self.IOPorts[address - 0xFF00],
     };
 }
@@ -52,17 +61,24 @@ pub fn write(self: *Io, address: u16, value: u8) void {
     // ----------------------------------------------------------------------
 
     switch (address) {
-        0xFF00 => self.setJoyp(value),
-        0xFF04...0xFF07 => self.bus.timer.write(address, value),
-        0xFF0F => self.setIF(value),
-        0xFF40...0xFF4B, 0xFF68...0xFF6B => self.bus.ppu.write(address, value),
-        0xFF4D => self.setKey1(value),
-        0xFF4F => self.bus.vbk = @intCast(value & 0b1),
+        0xFF00 => self.setJoyp(value), // Joypad input
+        0xFF01...0xFF02 => {}, // TODO: implement Serial transfer
+        0xFF04...0xFF07 => self.bus.timer.write(address, value), // Timer and divider
+        0xFF0F => self.setIF(value), // Interrupts
+        0xFF10...0xFF26 => {}, // TODO: implement Audio
+        0xFF30...0xFF3F => {}, // TODO: implement Wave pattern
+        0xFF40...0xFF4B => self.bus.ppu.write(address, value), // LCD Control, Status, Position, Scrolling, and Palettes
+        0xFF4C => {}, // TODO: implement KEY0
+        0xFF4D => self.setKey1(value), // KEY1
+        0xFF4F => self.bus.vbk = @intCast(value & 0b1), // VRAM Bank Select
         0xFF50 => {
-            std.log.info("Disabling boot rom\n", .{});
             self.bus.boot_rom_enabled = false;
-        }, // disable boot rom
-        0xFF70 => self.bus.wbk = @min(value & 0b111, 1),
+        }, // Boot ROM mapping control
+        0xFF51...0xFF55 => {}, // TODO: implement VRAM DMA
+        0xFF56 => {}, // TODO: IR port
+        0xFF68...0xFF6B => self.bus.ppu.write(address, value), // BG / OBJ Palettes
+        0xFF6C => {}, // TODO: implement Object priority mode
+        0xFF70 => self.bus.wbk = @min(value & 0b111, 1), // WRAM Bank Select
         else => self.IOPorts[address - 0xFF00] = value,
     }
 }
