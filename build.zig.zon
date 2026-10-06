@@ -36,6 +36,22 @@
             .url = "git+https://github.com/felixuxx/zsdl3.git#3659117a955d175c680add0ffaeeeb43e2537cfa",
             .hash = "zsdl3-0.0.0-l0pNpNL6BwCqFiKwNGiUePJa60agOcirrIiAgYDrYVLW",
         },
+        .sdl3_bin = .{
+            .url = "https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18-win32-x64.zip",
+            .hash = "N-V-__8AAB59KwBRyma2l_1G7qQ-gySmOurG40iF3Nvg1pUI",
+        },
+        .sdl3_image_bin = .{
+            .url = "https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-3.4.8-win32-x64.zip",
+            .hash = "N-V-__8AACULjgC-MTm4_4TcBbn7PRm8c9JYA_ghnrP_DB7E",
+        },
+        .sdl3_mixer_bin = .{
+            .url = "https://github.com/libsdl-org/SDL_mixer/releases/download/release-3.2.4/SDL3_mixer-3.2.4-win32-x64.zip",
+            .hash = "N-V-__8AAGzjHQB4PABmqqNm29c9S0tP76_qxkRKp8mCxV-V",
+        },
+        .sdl3_ttf_bin = .{
+            .url = "https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-3.2.2-win32-x64.zip",
+            .hash = "N-V-__8AACjjHgCNybncNSswX36yEi92eZjQ_DZ6iojT44QP",
+        },
     },
     .paths = .{
         "build.zig",
