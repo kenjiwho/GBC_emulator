@@ -19,7 +19,7 @@ const Interrupts = enum(u3) {
 const Key1 = packed struct {
     switch_armed: bool,
     _padding: u6,
-    current_speed: bool, // 0 = normal speed, 1 = double speed
+    is_double_speed: bool, // 0 = normal speed, 1 = double speed
 };
 
 pub fn init(bus: *Bus) Io {
@@ -124,7 +124,7 @@ pub fn request_interrupt(self: *Io, interrupt: Interrupts) void {
 
 pub fn toggleSpeed(self: *Io) void {
     var key1 = self.getKey1();
-    key1.current_speed = !key1.current_speed;
+    key1.is_double_speed = !key1.is_double_speed;
     key1.switch_armed = false;
     self.IOPorts[0x4D] = @bitCast(key1);
 }

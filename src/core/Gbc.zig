@@ -72,13 +72,13 @@ fn load_boot_rom(self: *Gbc, io: Io, gpa: Allocator, boot_rom_file: []const u8) 
 
 /// Execute CPU and PPU steps for one frame
 pub fn next_frame(self: *Gbc) void {
-    var frame_cycles: usize = 0;
+    var frame_dots: usize = 0;
     while (!self.ppu.frame_complete) {
-        const system_cycles = self.single_step();
-        frame_cycles += system_cycles;
+        const dots = self.single_step();
+        frame_dots += dots;
 
         // if lcd is disabled, wait for 70224 cycles before breaking
-        if (!self.ppu.lcdc.lcd_ppu_enable and frame_cycles >= CYCLES_PER_FRAME) {
+        if (!self.ppu.lcdc.lcd_ppu_enable and frame_dots >= CYCLES_PER_FRAME) {
             self.ppu.frame_complete = true;
         }
     }
@@ -86,45 +86,46 @@ pub fn next_frame(self: *Gbc) void {
 }
 
 pub fn single_step(self: *Gbc) usize {
-    if (self.dma.counter > 0) {
-        self.dma.step();
-        std.debug.print("DMA TRANSFER HAPPENING\n", .{});
-    } else {
-        self.cpu.step() catch {
-            const opcode = self.bus.read(self.cpu.regs.PC - 1);
-            std.debug.print(
-                "CRASH opcode=${X} PC=${X} SP=${X} AF=${X} BC=${X} DE=${X} HL=${X}\n",
-                .{
-                    opcode,
-                    self.cpu.regs.PC - 1,
-                    self.cpu.regs.SP,
-                    self.cpu.regs.getAF(),
-                    self.cpu.regs.getBC(),
-                    self.cpu.regs.getDE(),
-                    self.cpu.regs.getHL(),
-                },
-            );
-            std.debug.print(
-                "stack: [{X:0>4}]={X} [{X:0>4}]={X}\n",
-                .{
-                    self.cpu.regs.SP,
-                    self.bus.read(self.cpu.regs.SP),
-                    self.cpu.regs.SP + 1,
-                    self.bus.read(self.cpu.regs.SP + 1),
-                },
-            );
-            std.process.exit(1);
-        };
+    self.cpu.step() catch {
+        const opcode = self.bus.read(self.cpu.regs.PC - 1);
+        std.debug.print(
+            "CRASH opcode=${X} PC=${X} SP=${X} AF=${X} BC=${X} DE=${X} HL=${X}\n",
+            .{
+                opcode,
+                self.cpu.regs.PC - 1,
+                self.cpu.regs.SP,
+                self.cpu.regs.getAF(),
+                self.cpu.regs.getBC(),
+                self.cpu.regs.getDE(),
+                self.cpu.regs.getHL(),
+            },
+        );
+        std.debug.print(
+            "stack: [{X:0>4}]={X} [{X:0>4}]={X}\n",
+            .{
+                self.cpu.regs.SP,
+                self.bus.read(self.cpu.regs.SP),
+                self.cpu.regs.SP + 1,
+                self.bus.read(self.cpu.regs.SP + 1),
+            },
+        );
+        std.process.exit(1);
+    };
+
+    const T_cycles = self.bus.timer.get_last_cycles();
+
+    if (self.dma.mode == .oam) {
+        self.dma.step(T_cycles);
     }
 
-    const cycles = self.bus.timer.get_last_cycles();
+    // if double speed mode is enabled, each CPU cycle takes dots
+    const dots = if (self.bus.io.getKey1().is_double_speed)
+        T_cycles / 2
+    else
+        T_cycles;
 
-    // if double speed mode is enabled, each CPU cycle takes 2 system cycles
-    const is_double_speed = self.bus.io.getKey1().current_speed;
-    const system_cycles = if (is_double_speed) cycles / 2 else cycles;
-
-    self.ppu.step(system_cycles);
-    return system_cycles;
+    self.ppu.step(dots);
+    return dots;
 }
 
 fn setup_boot_state(self: *Gbc) void {

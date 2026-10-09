@@ -383,7 +383,7 @@ pub fn write(self: *Ppu, address: u16, value: u8) void {
             self.lyc = value;
             self.check_interrupts();
         },
-        0xFF46 => self.bus.dma.startTransfer(value), // enable OAM DMA transfer mode
+        0xFF46 => self.bus.dma.start_oam_dma_transfer(value), // enable OAM DMA transfer mode
         0xFF4A => self.wy = value,
         0xFF4B => self.wx = value,
         0xFF68 => self.bgpi = @bitCast(value),
