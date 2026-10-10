@@ -17,11 +17,11 @@ window_manager: WindowManager,
 quit: bool = false,
 is_paused: bool = false,
 
-pub fn init(io: Io, gpa: Allocator) !App {
+pub fn init(io: Io, gpa: Allocator, rom: []const u8) !App {
     const gbc = try Gbc.init(
         io,
         gpa,
-        "./tests/magen/hblank_vram_dma.gbc",
+        rom,
         "./tests/gbc_bios.bin",
     );
 

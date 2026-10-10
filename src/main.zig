@@ -6,9 +6,8 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    _ = args;
 
-    var app = try App.init(io, gpa);
+    var app = try App.init(io, gpa, args[1]);
     defer app.deinit(gpa);
     try app.run(gpa);
 }
