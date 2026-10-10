@@ -32,23 +32,27 @@ pub fn init(bus: *Bus, ppu: *Ppu) Dma {
 
 /// start a DMA transfer from the specified source high byte
 pub fn start_oam_dma_transfer(self: *Dma, source_high: u8) void {
-    std.log.info("oam DMA", .{});
     self.oam_source = @as(u16, source_high) << 8;
     self.counter = 160;
     self.oam_DMA = true;
 }
 
-pub fn start_dma_transfer(self: *Dma) void {
-    if ((self.hdma5.mode) == 1) {
-        std.log.info("hblank DMA", .{});
-        self.hblank_DMA = true;
-    } else {
+pub fn start_dma_transfer(self: *Dma, value: u8) void {
+    const hdma5: Hdma5 = @bitCast(value);
+    if ((hdma5.mode) == 0) {
+        // cancle hblank DMA
         if (self.hblank_DMA) {
             // if a H-Blank DMA transfer is in progress, the general dma request is a cancel command
             self.hblank_DMA = false;
             return;
         }
+        // general DMA
+        self.hdma5 = hdma5;
         self.perform_general_DMA();
+    } else {
+        // hblank DMA
+        self.hdma5 = hdma5;
+        self.hblank_DMA = true;
     }
 }
 
@@ -80,7 +84,8 @@ pub fn step_hblank(self: *Dma) void {
     // transfer 16 bytes per hblank which takes 8 M-cycles
     for (0..16) |_| {
         const value = self.bus.read_raw(source);
-        self.bus.write_raw(dest, value);
+        // dest is inside range 0x8000-0x9FFF (VRAM) so we add 0x8000 base address
+        self.bus.write_raw(0x8000 + dest, value);
         source += 1;
         dest += 1;
     }
@@ -100,16 +105,14 @@ pub fn step_hblank(self: *Dma) void {
     }
 }
 
-const std = @import("std");
 /// perform general DMA at once
 fn perform_general_DMA(self: *Dma) void {
-    std.log.info("general DMA", .{});
     var source = (@as(u16, self.hdma1) << 8 | self.hdma2) & 0b1111111111110000;
     var dest = (@as(u16, self.hdma3) << 8 | self.hdma4) & 0b0001111111110000;
     const bytes = (self.hdma5.length + 1) << 4; // + 1 * 16 bytes
     for (0..bytes) |_| {
         const value = self.bus.read_raw(source);
-        self.bus.write_raw(dest, value);
+        self.bus.write_raw(0x8000 + dest, value);
         source += 1;
         dest += 1;
     }
@@ -131,7 +134,7 @@ pub fn read(self: *Dma, address: u16) u8 {
         0xFF52 => self.hdma2, // HDMA2
         0xFF53 => self.hdma3, // HDMA3
         0xFF54 => self.hdma4, // HDMA4
-        0xFF55 => @bitCast(self.hdma5), // HDMA5
+        0xFF55 => if (self.hblank_DMA) self.hdma5.length else @bitCast(self.hdma5), // HDMA5
         else => 0xFF,
     };
 }
@@ -139,13 +142,10 @@ pub fn read(self: *Dma, address: u16) u8 {
 pub fn write(self: *Dma, address: u16, value: u8) void {
     switch (address) {
         0xFF51 => self.hdma1 = value, // HDMA1
-        0xFF52 => self.hdma2 = value, // HDMA2
-        0xFF53 => self.hdma3 = value, // HDMA3
-        0xFF54 => self.hdma4 = value, // HDMA4
-        0xFF55 => {
-            self.hdma5 = @bitCast(value);
-            self.start_dma_transfer();
-        }, // HDMA5
+        0xFF52 => self.hdma2 = value & 0xF0, // HDMA2
+        0xFF53 => self.hdma3 = value & 0x1F, // HDMA3
+        0xFF54 => self.hdma4 = value & 0xF0, // HDMA4
+        0xFF55 => self.start_dma_transfer(value), // HDMA5
         else => {},
     }
 }
