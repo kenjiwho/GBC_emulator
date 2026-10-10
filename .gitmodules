@@ -4,3 +4,6 @@
 [submodule "tests/mealybug"]
 	path = tests/mealybug
 	url = https://github.com/mattcurrie/mealybug-tearoom-tests.git
+[submodule "tests/magen"]
+	path = tests/magen
+	url = https://github.com/alloncm/MagenTests.git
