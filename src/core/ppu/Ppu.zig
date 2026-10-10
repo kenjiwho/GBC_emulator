@@ -90,6 +90,10 @@ pub fn step(self: *Ppu, cycles: usize) void {
                 }
             },
             .hblank => { // 87 - 204 dots
+                // hblank DMA is halted when cpu is halted
+                if (self.bus.dma.hblank_DMA and !self.bus.cpu.halted) {
+                    self.bus.dma.step_hblank();
+                }
                 dots_used += 2;
                 self.total_dots += 2;
                 if (self.total_dots >= 456) {

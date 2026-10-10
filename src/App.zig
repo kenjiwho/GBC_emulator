@@ -21,7 +21,7 @@ pub fn init(io: Io, gpa: Allocator) !App {
     const gbc = try Gbc.init(
         io,
         gpa,
-        "./tests/cgb-acid2.gbc",
+        "./tests/magen/hblank_vram_dma.gbc",
         "./tests/gbc_bios.bin",
     );
 

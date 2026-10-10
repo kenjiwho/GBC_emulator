@@ -114,8 +114,8 @@ pub fn single_step(self: *Gbc) usize {
 
     const T_cycles = self.bus.timer.get_last_cycles();
 
-    if (self.dma.mode == .oam) {
-        self.dma.step(T_cycles);
+    if (self.dma.oam_DMA) {
+        self.dma.step_oam(T_cycles);
     }
 
     // if double speed mode is enabled, each CPU cycle takes dots

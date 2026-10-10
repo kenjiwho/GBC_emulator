@@ -6,6 +6,7 @@ const Timer = @import("Timer.zig");
 const Mbc = @import("mbc/Mbc.zig").Mbc;
 const Io = @import("Io.zig");
 const Gbc = @import("Gbc.zig");
+const Cpu = @import("cpu/Cpu.zig");
 const Ppu = @import("ppu/Ppu.zig");
 const Dma = @import("Dma.zig");
 
@@ -26,6 +27,7 @@ IE: u8 = 0, // Interrupt Enable Register: FFFF
 // Modules
 timer: Timer,
 io: Io,
+cpu: *Cpu = undefined,
 ppu: *Ppu = undefined,
 mbc: Mbc = undefined,
 dma: *Dma = undefined,
@@ -38,7 +40,7 @@ pub fn init(gb: *Gbc) Bus {
     const timer = Timer.init(&gb.bus);
     const io = Io.init(&gb.bus);
 
-    return Bus{ .timer = timer, .io = io, .ppu = &gb.ppu, .dma = &gb.dma };
+    return Bus{ .timer = timer, .io = io, .cpu = &gb.cpu, .ppu = &gb.ppu, .dma = &gb.dma };
 }
 
 pub fn insert_rom(self: *Bus, rom: []const u8) void {

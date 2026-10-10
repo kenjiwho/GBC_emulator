@@ -41,7 +41,7 @@ pub fn read(self: *const Io, address: u16) u8 {
         0xFF4D => self.IOPorts[0x4D], // KEY1
         0xFF4F => @as(u8, self.bus.vbk) | 0xFE, // VRAM Bank Select (bit 0) + unused bits read as 1
         0xFF50 => @as(u8, self.bus.wbk) | 0xF8, // TODO: implement Boot ROM mapping control
-        0xFF51...0xFF55 => self.IOPorts[address - 0xFF00], // TODO: implement VRAM DMA
+        0xFF51...0xFF55 => self.bus.dma.read(address), // VRAM DMA
         0xFF56 => self.IOPorts[address - 0xFF00], // TODO: implement IR port
         0xFF68...0xFF6B => self.bus.ppu.read(address), // BG / OBJ Palettes
         0xFF6C => self.IOPorts[0x6C], // TODO: implement Object priority mode
@@ -74,7 +74,7 @@ pub fn write(self: *Io, address: u16, value: u8) void {
         0xFF50 => {
             self.bus.boot_rom_enabled = false;
         }, // Boot ROM mapping control
-        0xFF51...0xFF55 => {}, // TODO: implement VRAM DMA
+        0xFF51...0xFF55 => self.bus.dma.write(address, value), // VRAM DMA
         0xFF56 => {}, // TODO: IR port
         0xFF68...0xFF6B => self.bus.ppu.write(address, value), // BG / OBJ Palettes
         0xFF6C => {}, // TODO: implement Object priority mode
