@@ -32,15 +32,15 @@ pub fn init(bus: *Bus, ppu: *Ppu) Dma {
 
 /// start a DMA transfer from the specified source high byte
 pub fn start_oam_dma_transfer(self: *Dma, source_high: u8) void {
-    std.log.info("oam DMA\n", .{});
+    std.log.info("oam DMA", .{});
     self.oam_source = @as(u16, source_high) << 8;
     self.counter = 160;
     self.oam_DMA = true;
 }
 
 pub fn start_dma_transfer(self: *Dma) void {
-    if ((self.hdma5.mode) == 0) {
-        std.log.info("hblank DMA\n", .{});
+    if ((self.hdma5.mode) == 1) {
+        std.log.info("hblank DMA", .{});
         self.hblank_DMA = true;
     } else {
         if (self.hblank_DMA) {
@@ -91,21 +91,22 @@ pub fn step_hblank(self: *Dma) void {
     self.hdma2 = @intCast(source & 0b11110000); // Lower 4 bits always masked
     self.hdma3 = @intCast((dest & 0b0001111111110000) >> 8);
     self.hdma4 = @intCast(dest & 0b11110000);
-    self.hdma5.length -= 1;
 
     if (self.hdma5.length == 0) {
         self.hblank_DMA = false;
         self.hdma5 = @bitCast(@as(u8, 0xFF)); // set HDMA5 to 0xFF when transfer is complete
+    } else {
+        self.hdma5.length -= 1;
     }
 }
 
 const std = @import("std");
 /// perform general DMA at once
 fn perform_general_DMA(self: *Dma) void {
-    std.log.info("general DMA\n", .{});
+    std.log.info("general DMA", .{});
     var source = (@as(u16, self.hdma1) << 8 | self.hdma2) & 0b1111111111110000;
     var dest = (@as(u16, self.hdma3) << 8 | self.hdma4) & 0b0001111111110000;
-    const bytes = (self.hdma5.length + 1) >> 4; // + 1 * 16 bytes
+    const bytes = (self.hdma5.length + 1) << 4; // + 1 * 16 bytes
     for (0..bytes) |_| {
         const value = self.bus.read_raw(source);
         self.bus.write_raw(dest, value);
