@@ -235,9 +235,8 @@ fn draw_pixel(self: *Ppu) !void {
             const obj_priority = obj_pixel.background_priority;
             const master_priority = self.lcdc.priority; // LCDC Bit 0
 
-            // if lcdc.0 is 0, sprites always win.
-            // otherwise, OBJ wins if BG is transparent, or if neither BG nor OBJ has priority.
-            if (!master_priority or bg_transparent or (!bg_priority and !obj_priority)) {
+            // decide priority as mentioned in https://gbdev.io/pandocs/Tile_Maps.html#bg-to-obj-priority-in-cgb-mode
+            if (bg_transparent or !master_priority or (!bg_priority and !obj_priority)) {
                 final_pixel = obj_pixel;
                 is_obj = true;
             }

@@ -33,12 +33,12 @@ pub const Pixel = struct {
 };
 
 pub const OamAttributes = packed struct {
-    cgb_palette: u3 = 0, // 0-2
-    vram_bank: u1 = 0, // 3
-    dmg_palette: u1 = 0, // 4
-    x_flip: bool = false, // 5
-    y_flip: bool = false, // 6
-    priority: bool = false, // 7
+    cgb_palette: u3 = 0, // 0-2: [CGB Mode Only]: Which of OBP0–7 to use
+    vram_bank: u1 = 0, // 3: [CGB Mode Only]: 0 = Fetch tile from VRAM bank 0, 1 = Fetch tile from VRAM bank 1
+    dmg_palette: u1 = 0, // 4: [non-CGB mode only]: 0 = OBP0, 1 = OBP1
+    x_flip: bool = false, // 5: 0 = Normal, 1 = Entire OBJ is horizontally mirrored
+    y_flip: bool = false, // 6: 0 = Normal, 1 = Entire OBJ is vertically mirrored
+    priority: bool = false, // 7: 0 = No, 1 = BG and Window color indices 1–3 are drawn over this OBJ
 };
 
 pub const OamEntry = packed struct {
