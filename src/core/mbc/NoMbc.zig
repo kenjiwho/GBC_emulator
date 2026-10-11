@@ -1,13 +1,14 @@
 //! implementation of no mbc
 const Mbc1 = @This();
 
-ROM_size: u21,
+max_ROM_size: u21,
 external_RAM_enabled: bool = false,
+external_RAM_start_address: u16 = 0xA000,
 
 pub fn init(rom_size_code: u8) Mbc1 {
     const ROM_size: u21 = @as(u21, 0x8000) * (@as(u7, 1) << @intCast(rom_size_code));
 
-    return Mbc1{ .ROM_size = ROM_size };
+    return Mbc1{ .max_ROM_size = ROM_size };
 }
 
 pub fn setROMBank(self: *Mbc1, value: u8) void {
@@ -37,8 +38,7 @@ pub fn mapROMAddress(self: *const Mbc1, address: u16) u21 {
 
 pub fn mapRAMAddress(self: *const Mbc1, address: u16) u15 {
     // do nothing, no banking
-    _ = self;
-    return @intCast(address);
+    return @intCast(address - self.external_RAM_start_address);
 }
 
 pub fn toggleExternalRAM(self: *Mbc1, value: u8) void {

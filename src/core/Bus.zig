@@ -59,57 +59,13 @@ pub fn insert_boot_rom(self: *Bus, boot_rom: []const u8) void {
 pub fn read(self: *Bus, address: u16) u8 {
     self.timer.tick(); // advance timer on each read
 
-    if (self.boot_rom_enabled) {
-        if (address <= 0x00FF) {
-            return self.boot_ROM[address]; // First 256 bytes
-        } else if (address >= 0x0100 and address <= 0x014F) {
-            return self.ROM[address]; // Read from the game cartridge header
-        } else if (address >= 0x0200 and address <= 0x08FF) {
-            return self.boot_ROM[address]; // second mapped region of CGB boot ROM
-        }
-    }
-
-    return switch (address) {
-        0x0000...0x3FFF => self.ROM[address],
-        0x4000...0x7FFF => self.ROM[self.mbc.mapROMAddress(address)],
-        0x8000...0x9FFF => self.ppu.read_vram_cpu(self.vbk, address),
-        0xA000...0xBFFF => if (self.mbc.ExternalRAM_enabled()) self.external_RAM[address - 0xA000] else 0xFF,
-        0xC000...0xCFFF => self.WRAM[address - 0xC000],
-        0xD000...0xDFFF => self.WRAM[(address - 0xD000) + (@as(u16, self.wbk) * 0x1000)],
-        0xE000...0xEFFF => self.WRAM[address - 0xE000], // Echo RAM
-        0xF000...0xFDFF => self.WRAM[(address - 0xF000) + (@as(u16, self.wbk) * 0x1000)], // Echo RAM
-        0xFE00...0xFE9F => self.ppu.read_oam_cpu(address),
-        0xFEA0...0xFEFF => 0, // Unusable
-        0xFF00...0xFF7F => self.io.read(address),
-        0xFF80...0xFFFE => self.HRAM[address - 0xFF80],
-        0xFFFF => self.IE,
-    };
+    return self.read_raw(address);
 }
 
 pub fn write(self: *Bus, address: u16, value: u8) void {
     self.timer.tick(); // advance timer on each write
 
-    switch (address) {
-        0x0000...0x1FFF => self.mbc.toggleExternalRAM(value),
-        0x2000...0x3FFF => self.mbc.setROMBank(value),
-        0x4000...0x5FFF => self.mbc.setSecondaryBank(value),
-        0x6000...0x7FFF => self.mbc.setMode(value),
-        0x8000...0x9FFF => self.ppu.write_vram_cpu(self.vbk, address, value),
-        0xA000...0xBFFF => {
-            if (self.mbc.ExternalRAM_enabled()) {
-                self.external_RAM[self.mbc.mapRAMAddress(address)] = value;
-            }
-        },
-        0xC000...0xCFFF => self.WRAM[(address - 0xC000)] = value,
-        0xD000...0xDFFF => self.WRAM[(address - 0xD000) + (@as(u16, self.wbk) * 0x1000)] = value,
-        0xE000...0xEFFF => self.WRAM[(address - 0xE000)] = value, // Echo RAM
-        0xF000...0xFDFF => self.WRAM[(address - 0xF000) + (@as(u16, self.wbk) * 0x1000)] = value, // Echo RAM
-        0xFE00...0xFE9F => self.ppu.write_oam_cpu(address, value),
-        0xFEA0...0xFEFF => {}, // Unusable
-        0xFF00...0xFF7F => self.io.write(address, value),
-        0xFF80...0xFFFE => self.HRAM[address - 0xFF80] = value,
-        0xFFFF => self.IE = value,
-    }
+    self.write_raw(address, value);
 }
 
 /// same as read() and write() but does not tick timer
@@ -130,9 +86,9 @@ pub fn read_raw(self: *Bus, address: u16) u8 {
         0x8000...0x9FFF => self.ppu.read_vram_cpu(self.vbk, address),
         0xA000...0xBFFF => if (self.mbc.ExternalRAM_enabled()) self.external_RAM[address - 0xA000] else 0xFF,
         0xC000...0xCFFF => self.WRAM[address - 0xC000],
-        0xD000...0xDFFF => self.WRAM[(address - 0xD000) + (@as(u16, self.wbk) * 0x1000)],
+        0xD000...0xDFFF => self.WRAM[(address - 0xD000) + (@as(u16, @max(self.wbk, 1)) * 0x1000)],
         0xE000...0xEFFF => self.WRAM[address - 0xE000], // Echo RAM
-        0xF000...0xFDFF => self.WRAM[(address - 0xF000) + (@as(u16, self.wbk) * 0x1000)], // Echo RAM
+        0xF000...0xFDFF => self.WRAM[(address - 0xF000) + (@as(u16, @max(self.wbk, 1)) * 0x1000)], // Echo RAM
         0xFE00...0xFE9F => self.ppu.read_oam_cpu(address),
         0xFEA0...0xFEFF => 0, // Unusable
         0xFF00...0xFF7F => self.io.read(address),
@@ -154,9 +110,9 @@ pub fn write_raw(self: *Bus, address: u16, value: u8) void {
             }
         },
         0xC000...0xCFFF => self.WRAM[(address - 0xC000)] = value,
-        0xD000...0xDFFF => self.WRAM[(address - 0xD000) + (@as(u16, self.wbk) * 0x1000)] = value,
+        0xD000...0xDFFF => self.WRAM[(address - 0xD000) + (@as(u16, @max(self.wbk, 1)) * 0x1000)] = value,
         0xE000...0xEFFF => self.WRAM[(address - 0xE000)] = value, // Echo RAM
-        0xF000...0xFDFF => self.WRAM[(address - 0xF000) + (@as(u16, self.wbk) * 0x1000)] = value, // Echo RAM
+        0xF000...0xFDFF => self.WRAM[(address - 0xF000) + (@as(u16, @max(self.wbk, 1)) * 0x1000)] = value, // Echo RAM
         0xFE00...0xFE9F => self.ppu.write_oam_cpu(address, value),
         0xFEA0...0xFEFF => {}, // Unusable
         0xFF00...0xFF7F => self.io.write(address, value),
