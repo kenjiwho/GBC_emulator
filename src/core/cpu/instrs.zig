@@ -125,7 +125,7 @@ fn NOP(cpu: *const Cpu) void {
 /// Cycles: 3
 /// Bytes: 3
 fn LD_r16_imm16(cpu: *Cpu) void {
-    const r16: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16: u2 = @truncate(cpu.opcode >> 4);
     const imm16 = cpu.getImm16();
 
     cpu.setR16(r16, imm16);
@@ -137,7 +137,7 @@ fn LD_r16_imm16(cpu: *Cpu) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_r16mem_A(cpu: *Cpu) void {
-    const r16mem: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16mem: u2 = @truncate(cpu.opcode >> 4);
     const addr = cpu.getR16mem(r16mem);
 
     cpu.bus.write(addr, cpu.regs.A);
@@ -149,7 +149,7 @@ fn LD_r16mem_A(cpu: *Cpu) void {
 /// Cycles: 2
 /// Bytes: 1
 fn LD_A_r16mem(cpu: *Cpu) void {
-    const r16mem: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16mem: u2 = @truncate(cpu.opcode >> 4);
     const addr = cpu.getR16mem(r16mem);
 
     cpu.regs.A = cpu.bus.read(addr);
@@ -162,7 +162,7 @@ fn LD_A_r16mem(cpu: *Cpu) void {
 /// Bytes: 3
 fn LD_imm16_SP(cpu: *Cpu) void {
     const imm16 = cpu.getImm16();
-    cpu.bus.write(imm16, @intCast(cpu.regs.SP & 0xFF));
+    cpu.bus.write(imm16, @truncate(cpu.regs.SP));
     cpu.bus.write(imm16 + 1, @intCast(cpu.regs.SP >> 8));
 }
 
@@ -172,7 +172,7 @@ fn LD_imm16_SP(cpu: *Cpu) void {
 /// Bytes: 1
 fn INC_r16(cpu: *Cpu) void {
     cpu.internalCycle(); // 16-bit arithmetic takes consumes an M-cycle
-    const r16: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16: u2 = @truncate(cpu.opcode >> 4);
     const new_val = cpu.getR16(r16) +% 1;
 
     cpu.setR16(r16, new_val);
@@ -184,7 +184,7 @@ fn INC_r16(cpu: *Cpu) void {
 /// Bytes: 1
 fn DEC_r16(cpu: *Cpu) void {
     cpu.internalCycle();
-    const r16: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16: u2 = @truncate(cpu.opcode >> 4);
     const new_val = cpu.getR16(r16) -% 1;
 
     cpu.setR16(r16, new_val);
@@ -200,7 +200,7 @@ fn DEC_r16(cpu: *Cpu) void {
 ///     C=Set if overflow from bit 15
 fn ADD_HL_r16(cpu: *Cpu) void {
     cpu.internalCycle();
-    const r16: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16: u2 = @truncate(cpu.opcode >> 4);
     const val = cpu.getR16(r16);
 
     const hl = cpu.regs.getHL();
@@ -221,7 +221,7 @@ fn ADD_HL_r16(cpu: *Cpu) void {
 ///     N=0
 ///     H=Set if overflow from bit 3
 fn INC_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const r8: u3 = @truncate(cpu.opcode >> 3);
     const val = cpu.getR8(r8);
     const new_val = val +% 1;
 
@@ -240,7 +240,7 @@ fn INC_r8(cpu: *Cpu) void {
 ///     N=1
 ///     H=Set if borrow from bit 4
 fn DEC_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const r8: u3 = @truncate(cpu.opcode >> 3);
     const val = cpu.getR8(r8);
     const new_val = val -% 1;
 
@@ -255,7 +255,7 @@ fn DEC_r8(cpu: *Cpu) void {
 /// Cycles: 2
 /// Bytes: 2
 fn LD_r8_imm8(cpu: *Cpu) void {
-    const r8: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const r8: u3 = @truncate(cpu.opcode >> 3);
     const imm8 = cpu.getImm8(u8);
 
     cpu.setR8(r8, imm8);
@@ -457,7 +457,7 @@ fn JR_imm8(cpu: *Cpu) void {
 /// Cycles: 3 taken / 2 untaken
 /// Bytes: 2
 fn JR_cond_imm8(cpu: *Cpu) void {
-    const cond: u2 = @intCast((cpu.opcode >> 3) & 0b11);
+    const cond: u2 = @truncate(cpu.opcode >> 3);
     if (cpu.checkCondition(cond)) {
         JR_imm8(cpu);
     } else {
@@ -529,8 +529,8 @@ fn STOP(cpu: *Cpu) void {
 /// Cycles: 1 or 2 if (HL)
 /// Bytes: 1
 fn LD_r8_r8(cpu: *Cpu) void {
-    const src: u3 = @intCast(cpu.opcode & 0b111);
-    const dest: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const src: u3 = @truncate(cpu.opcode);
+    const dest: u3 = @truncate(cpu.opcode >> 3);
 
     const value = cpu.getR8(src);
 
@@ -581,7 +581,7 @@ fn HALT(cpu: *Cpu) void {
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
 fn ADD_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
     const old_a = cpu.regs.A;
 
@@ -602,7 +602,7 @@ fn ADD_A_r8(cpu: *Cpu) void {
 ///     H=Set if overflow from bit 3
 ///     C=Set if overflow from bit 7
 fn ADC_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
     const carry = @intFromBool(cpu.getFlag(.C));
     const old_a = cpu.regs.A;
@@ -626,7 +626,7 @@ fn ADC_A_r8(cpu: *Cpu) void {
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
 fn SUB_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
     const old_a = cpu.regs.A;
 
@@ -648,7 +648,7 @@ fn SUB_A_r8(cpu: *Cpu) void {
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if (r8 + C) > A)
 fn SBC_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
     const carry = @intFromBool(cpu.getFlag(.C));
     const old_a = cpu.regs.A;
@@ -673,7 +673,7 @@ fn SBC_A_r8(cpu: *Cpu) void {
 ///     H=1
 ///     C=0
 fn AND_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
 
     cpu.regs.A = cpu.regs.A & value;
@@ -693,7 +693,7 @@ fn AND_A_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=0
 fn XOR_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
 
     cpu.regs.A = cpu.regs.A ^ value;
@@ -713,7 +713,7 @@ fn XOR_A_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=0
 fn OR_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
 
     cpu.regs.A = cpu.regs.A | value;
@@ -735,7 +735,7 @@ fn OR_A_r8(cpu: *Cpu) void {
 ///     H=Set if borrow from bit 4
 ///     C=Set if borrow (i.e. if r8 > A)
 fn CP_A_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     const value = cpu.getR8(r8);
     const old_a = cpu.regs.A;
 
@@ -930,7 +930,7 @@ fn RET(cpu: *Cpu) void {
 /// Cycles: 5 taken / 2 untaken
 /// Bytes: 1
 fn RET_cond(cpu: *Cpu) void {
-    const cond: u2 = @intCast((cpu.opcode >> 3) & 0b11);
+    const cond: u2 = @truncate(cpu.opcode >> 3);
 
     cpu.internalCycle(); // decision cycle
     if (cpu.checkCondition(cond)) {
@@ -966,7 +966,7 @@ fn JP_imm16(cpu: *Cpu) void {
 /// Cycles: 4 taken / 3 untaken
 /// Bytes: 3
 fn JP_cond_imm16(cpu: *Cpu) void {
-    const cond: u2 = @intCast((cpu.opcode >> 3) & 0b11);
+    const cond: u2 = @truncate(cpu.opcode >> 3);
 
     if (cpu.checkCondition(cond)) {
         JP_imm16(cpu);
@@ -1002,7 +1002,7 @@ fn CALL_imm16(cpu: *Cpu) void {
 /// Cycles: 6 taken / 3 untaken
 /// Bytes: 3
 fn CALL_cond_imm16(cpu: *Cpu) void {
-    const cond: u2 = @intCast((cpu.opcode >> 3) & 0b11);
+    const cond: u2 = @truncate(cpu.opcode >> 3);
 
     if (cpu.checkCondition(cond)) {
         CALL_imm16(cpu);
@@ -1028,7 +1028,7 @@ fn RST_tgt3(cpu: *Cpu) void {
 /// Bytes: 1
 fn POP_r16stk(cpu: *Cpu) void {
     const value = cpu.pop();
-    const r16stk: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16stk: u2 = @truncate(cpu.opcode >> 4);
 
     cpu.setR16stk(r16stk, value);
 }
@@ -1038,7 +1038,7 @@ fn POP_r16stk(cpu: *Cpu) void {
 /// Cycles: 4
 /// Bytes: 1
 fn PUSH_r16stk(cpu: *Cpu) void {
-    const r16stk: u2 = @intCast((cpu.opcode >> 4) & 0b11);
+    const r16stk: u2 = @truncate(cpu.opcode >> 4);
     const value = cpu.getR16stk(r16stk);
 
     cpu.push(value);
@@ -1243,7 +1243,7 @@ fn CB_prefix(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 7 of r8
 fn RLC_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const carry = value >> 7;
 
@@ -1266,7 +1266,7 @@ fn RLC_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 0 of r8
 fn RRC_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const carry = value & 0b1;
 
@@ -1289,7 +1289,7 @@ fn RRC_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 7 of r8
 fn RL_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const old_carry = @intFromBool(cpu.getFlag(.C));
     const new_carry = (value >> 7) & 0b1;
@@ -1313,7 +1313,7 @@ fn RL_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 0 of r8
 fn RR_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const old_carry: u8 = @intFromBool(cpu.getFlag(.C));
     const new_carry = value & 0b1;
@@ -1338,7 +1338,7 @@ fn RR_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 7 of r8
 fn SLA_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const carry = value >> 7;
 
@@ -1362,7 +1362,7 @@ fn SLA_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 0 of r8
 fn SRA_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const carry = value & 0b1;
     const bit7 = value & 0b10000000;
@@ -1387,7 +1387,7 @@ fn SRA_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=0
 fn SWAP_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const high = value >> 4;
     const low = value & 0xF;
@@ -1412,7 +1412,7 @@ fn SWAP_r8(cpu: *Cpu) void {
 ///     H=0
 ///     C=Set to old bit 0 of r8
 fn SRL_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
     var value = cpu.getR8(r8);
     const carry = value & 0b1;
 
@@ -1435,8 +1435,8 @@ fn SRL_r8(cpu: *Cpu) void {
 ///     N=0
 ///     H=1
 fn BIT_b3_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
-    const b3: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
+    const b3: u3 = @truncate(cpu.opcode >> 3);
     const value = cpu.getR8(r8);
 
     const bit = (value >> b3) & 0b1;
@@ -1452,8 +1452,8 @@ fn BIT_b3_r8(cpu: *Cpu) void {
 /// Cycles: 2 or 4 if (HL)
 /// Bytes: 2
 fn RES_b3_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
-    const b3: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
+    const b3: u3 = @truncate(cpu.opcode >> 3);
     var value = cpu.getR8(r8);
 
     value &= (@as(u8, 1) << b3) ^ 0xFF;
@@ -1467,8 +1467,8 @@ fn RES_b3_r8(cpu: *Cpu) void {
 /// Cycles: 2 or 4 if (HL)
 /// Bytes: 2
 fn SET_b3_r8(cpu: *Cpu) void {
-    const r8: u3 = @intCast(cpu.opcode & 0b111);
-    const b3: u3 = @intCast((cpu.opcode >> 3) & 0b111);
+    const r8: u3 = @truncate(cpu.opcode);
+    const b3: u3 = @truncate(cpu.opcode >> 3);
     var value = cpu.getR8(r8);
 
     value |= @as(u8, 1) << b3;
